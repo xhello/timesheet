@@ -169,6 +169,54 @@ export async function updateTimeEntry(id: string, updates: Partial<TimeEntry>): 
   return data;
 }
 
+// Get all employees (for face matching across all businesses)
+export async function getAllEmployees(): Promise<Employee[]> {
+  const { data, error } = await supabase
+    .from('employees')
+    .select('*')
+    .eq('is_active', true);
+  
+  if (error) throw error;
+  return data || [];
+}
+
+// Get employee by ID
+export async function getEmployeeById(employeeId: string): Promise<Employee | null> {
+  const { data, error } = await supabase
+    .from('employees')
+    .select('*')
+    .eq('id', employeeId)
+    .single();
+  
+  if (error) return null;
+  return data;
+}
+
+// Get time entries for an employee
+export async function getTimeEntriesByEmployee(employeeId: string, limit: number = 50): Promise<TimeEntry[]> {
+  const { data, error } = await supabase
+    .from('time_entries')
+    .select('*')
+    .eq('employee_id', employeeId)
+    .order('clock_in_time', { ascending: false })
+    .limit(limit);
+  
+  if (error) throw error;
+  return data || [];
+}
+
+// Get business by ID
+export async function getBusinessById(businessId: string): Promise<Business | null> {
+  const { data, error } = await supabase
+    .from('businesses')
+    .select('*')
+    .eq('id', businessId)
+    .single();
+  
+  if (error) return null;
+  return data;
+}
+
 // Generate business code
 export function generateBusinessCode(): string {
   const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
