@@ -248,129 +248,143 @@ export default function ClockInOut({ business, onBack }: Props) {
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
       {/* Header */}
-      <div className="px-4 py-4 flex items-center">
+      <div className="px-4 py-4 flex items-center border-b border-white/10">
         <button onClick={onBack} className="text-white/70 hover:text-white">
           ← Back
         </button>
-        <h1 className="flex-1 text-center text-white font-semibold">
+        <h1 className="flex-1 text-center text-white font-semibold text-xl">
           Clock In / Out
         </h1>
         <div className="w-12" />
       </div>
 
-      {/* Re-capture button - shown when someone is recognized */}
-      {matchedEmployee && (
-        <div className="px-4 pb-4">
-          <button
-            onClick={handleRecapture}
-            className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
-          >
-            <span>🔄</span>
-            <span>Not you? Re-capture</span>
-          </button>
-        </div>
-      )}
+      {/* Main Content - Side by Side Layout */}
+      <div className="flex-1 flex flex-col lg:flex-row p-4 gap-6">
+        {/* Left Side - Camera View */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="relative w-full max-w-lg aspect-[3/4] bg-black rounded-2xl overflow-hidden">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover transform scale-x-[-1]"
+            />
 
-      {/* Camera View */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4">
-        <div className="relative w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover transform scale-x-[-1]"
-          />
-
-          {/* Face Guide Overlay */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className={`w-48 h-64 border-4 rounded-full ${
-              status === 'verified' 
-                ? 'border-green-500' 
-                : status === 'detecting' 
-                  ? 'border-yellow-500' 
-                  : 'border-white/50'
-            }`} />
-          </div>
-
-          {/* Status Badge */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2">
-            <div className={`px-4 py-2 rounded-full text-white text-sm font-medium ${
-              status === 'verified' 
-                ? 'bg-green-500' 
-                : status === 'error' 
-                  ? 'bg-red-500' 
-                  : 'bg-blue-500'
-            }`}>
-              {message}
+            {/* Face Guide Overlay */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className={`w-48 h-64 border-4 rounded-full ${
+                status === 'verified' 
+                  ? 'border-green-500' 
+                  : status === 'detecting' 
+                    ? 'border-yellow-500' 
+                    : 'border-white/50'
+              }`} />
             </div>
-          </div>
 
-          {/* Match Progress Indicator */}
-          {status === 'detecting' && matchStreak > 0 && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-              <div className="flex gap-2">
-                {Array.from({ length: REQUIRED_CONSECUTIVE_MATCHES }).map((_, i) => (
-                  <div
-                    key={i}
-                    className={`w-3 h-3 rounded-full transition-colors ${
-                      i < matchStreak ? 'bg-green-500' : 'bg-white/30'
-                    }`}
-                  />
-                ))}
+            {/* Status Badge */}
+            <div className="absolute top-4 left-1/2 -translate-x-1/2">
+              <div className={`px-4 py-2 rounded-full text-white text-sm font-medium ${
+                status === 'verified' 
+                  ? 'bg-green-500' 
+                  : status === 'error' 
+                    ? 'bg-red-500' 
+                    : 'bg-blue-500'
+              }`}>
+                {message}
               </div>
+            </div>
+
+            {/* Match Progress Indicator */}
+            {status === 'detecting' && matchStreak > 0 && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+                <div className="flex gap-2">
+                  {Array.from({ length: REQUIRED_CONSECUTIVE_MATCHES }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-3 h-3 rounded-full transition-colors ${
+                        i < matchStreak ? 'bg-green-500' : 'bg-white/30'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Side - Employee Info & Action Buttons */}
+        <div className="lg:w-80 flex flex-col justify-center">
+          {matchedEmployee ? (
+            <div className="space-y-6">
+              {/* Employee Info */}
+              <div className="bg-white/5 rounded-2xl p-6 text-center">
+                <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-4xl">👤</span>
+                </div>
+                <p className="text-2xl font-bold text-white">{matchedEmployee.full_name}</p>
+                <p className="text-white/60">{matchedEmployee.email}</p>
+              </div>
+
+              {/* Re-capture Button */}
+              <button
+                onClick={handleRecapture}
+                className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                <span>🔄</span>
+                <span>Not you? Re-capture</span>
+              </button>
+
+              {/* Clock In/Out Button */}
+              {hasActiveEntry ? (
+                <button
+                  onClick={handleClockOut}
+                  disabled={isProcessing}
+                  className="w-full py-5 bg-red-500 hover:bg-red-600 disabled:bg-gray-600 text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
+                >
+                  {isProcessing ? (
+                    <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <span className="text-2xl">🕐</span>
+                      <span>Clock Out</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={handleClockIn}
+                  disabled={isProcessing}
+                  className="w-full py-5 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
+                >
+                  {isProcessing ? (
+                    <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <span className="text-2xl">⏱️</span>
+                      <span>Clock In</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="text-center text-white/60 bg-white/5 rounded-2xl p-8">
+              <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-3xl">👁️</span>
+              </div>
+              <p className="text-lg font-medium text-white mb-2">Looking for your face...</p>
+              <p className="text-sm">Position your face in the frame to clock in or out</p>
             </div>
           )}
         </div>
-
-        {/* Action Buttons */}
-        {matchedEmployee && (
-          <div className="w-full max-w-md mt-6 space-y-4">
-            <div className="text-center text-white mb-4">
-              <p className="text-lg font-semibold">{matchedEmployee.full_name}</p>
-              <p className="text-white/60 text-sm">{matchedEmployee.email}</p>
-            </div>
-
-            {hasActiveEntry ? (
-              <button
-                onClick={handleClockOut}
-                disabled={isProcessing}
-                className="w-full py-4 bg-red-500 hover:bg-red-600 disabled:bg-gray-600 text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-2"
-              >
-                {isProcessing ? (
-                  <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <span>🕐</span>
-                    <span>Clock Out</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                onClick={handleClockIn}
-                disabled={isProcessing}
-                className="w-full py-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-2"
-              >
-                {isProcessing ? (
-                  <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <span>⏱️</span>
-                    <span>Clock In</span>
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-        )}
-
-        {status === 'detecting' && !matchedEmployee && (
-          <p className="text-white/60 text-center mt-4">
-            Face not recognized. Please sign up first if you&apos;re a new employee.
-          </p>
-        )}
       </div>
+
+      {status === 'detecting' && !matchedEmployee && (
+        <p className="text-white/60 text-center pb-4">
+          Face not recognized. Please sign up first if you&apos;re a new employee.
+        </p>
+      )}
     </div>
   );
 }
