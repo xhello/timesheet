@@ -1,0 +1,57 @@
+'use client';
+
+import { useState } from 'react';
+import BusinessLogin from '@/components/BusinessLogin';
+import BusinessSignUp from '@/components/BusinessSignUp';
+import ForgotBusinessID from '@/components/ForgotBusinessID';
+import EmployeeHome from '@/components/EmployeeHome';
+import { Business } from '@/lib/supabase';
+
+type View = 'login' | 'signup' | 'forgot' | 'employee-home';
+
+export default function Home() {
+  const [currentView, setCurrentView] = useState<View>('login');
+  const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
+
+  const handleLoginSuccess = (business: Business) => {
+    setCurrentBusiness(business);
+    setCurrentView('employee-home');
+  };
+
+  const handleLogout = () => {
+    setCurrentBusiness(null);
+    setCurrentView('login');
+  };
+
+  return (
+    <main className="min-h-screen">
+      {currentView === 'login' && (
+        <BusinessLogin
+          onLoginSuccess={handleLoginSuccess}
+          onSignUpClick={() => setCurrentView('signup')}
+          onForgotClick={() => setCurrentView('forgot')}
+        />
+      )}
+      
+      {currentView === 'signup' && (
+        <BusinessSignUp
+          onBack={() => setCurrentView('login')}
+          onSuccess={() => setCurrentView('login')}
+        />
+      )}
+      
+      {currentView === 'forgot' && (
+        <ForgotBusinessID
+          onBack={() => setCurrentView('login')}
+        />
+      )}
+      
+      {currentView === 'employee-home' && currentBusiness && (
+        <EmployeeHome
+          business={currentBusiness}
+          onLogout={handleLogout}
+        />
+      )}
+    </main>
+  );
+}
