@@ -112,6 +112,8 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
   };
 
   if (showSuccess) {
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-md text-center space-y-6">
@@ -136,8 +138,36 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
             </p>
           </div>
 
+          {/* Direct Links */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 text-left space-y-3">
+            <p className="text-sm font-semibold text-gray-700 mb-2">📎 Direct Links for Employees:</p>
+            
+            <div className="space-y-2">
+              <div>
+                <p className="text-xs text-gray-500">Employee Portal:</p>
+                <code className="text-xs bg-gray-100 px-2 py-1 rounded block break-all text-blue-600">
+                  {baseUrl}/{generatedCode}
+                </code>
+              </div>
+              
+              <div>
+                <p className="text-xs text-gray-500">Clock In/Out:</p>
+                <code className="text-xs bg-gray-100 px-2 py-1 rounded block break-all text-blue-600">
+                  {baseUrl}/{generatedCode}/clock
+                </code>
+              </div>
+              
+              <div>
+                <p className="text-xs text-gray-500">New Employee Sign Up:</p>
+                <code className="text-xs bg-gray-100 px-2 py-1 rounded block break-all text-blue-600">
+                  {baseUrl}/{generatedCode}/signup
+                </code>
+              </div>
+            </div>
+          </div>
+
           <p className="text-orange-500 text-sm">
-            ⚠️ Save this code! You&apos;ll need it to log in.
+            ⚠️ Save these links! Share them with your employees.
           </p>
 
           <button
