@@ -617,7 +617,7 @@ function EmployeeDashboard({
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
               />
             </div>
             <div>
@@ -626,7 +626,7 @@ function EmployeeDashboard({
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
               />
             </div>
           </div>
@@ -764,7 +764,7 @@ function EmployeeDashboard({
                       type="datetime-local"
                       value={editClockIn}
                       onChange={(e) => setEditClockIn(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
                     />
                   </div>
 
@@ -774,7 +774,7 @@ function EmployeeDashboard({
                       type="datetime-local"
                       value={editClockOut}
                       onChange={(e) => setEditClockOut(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
                     />
                   </div>
 
@@ -785,7 +785,7 @@ function EmployeeDashboard({
                       onChange={(e) => setEditReason(e.target.value)}
                       placeholder="Please explain why you need this time change..."
                       rows={3}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none text-gray-900"
                     />
                   </div>
 

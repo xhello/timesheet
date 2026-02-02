@@ -173,7 +173,7 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
             value={businessName}
             onChange={(e) => setBusinessName(e.target.value)}
             placeholder="Enter business name"
-            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
           />
         </div>
 
@@ -186,7 +186,7 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Enter email address"
-            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
           />
         </div>
 
