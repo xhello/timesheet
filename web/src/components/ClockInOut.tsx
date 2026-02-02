@@ -26,7 +26,8 @@ interface Props {
 
 type Status = 'loading' | 'ready' | 'detecting' | 'verified' | 'error';
 
-const MAX_DISTANCE_MILES = 1; // Maximum distance allowed for clock in/out
+const MAX_DISTANCE_METERS = 500; // Maximum distance allowed for clock in/out (in meters)
+const MAX_DISTANCE_MILES = MAX_DISTANCE_METERS / 1609.34; // Convert to miles for calculation
 
 export default function ClockInOut({ business, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -79,7 +80,8 @@ export default function ClockInOut({ business, onBack }: Props) {
           setIsWithinRange(distance <= MAX_DISTANCE_MILES);
           
           if (distance > MAX_DISTANCE_MILES) {
-            setLocationError(`You are ${distance.toFixed(2)} miles away. Must be within ${MAX_DISTANCE_MILES} mile.`);
+            const distanceMeters = Math.round(distance * 1609.34);
+            setLocationError(`You are ${distanceMeters}m away. Must be within ${MAX_DISTANCE_METERS}m.`);
           } else {
             setLocationError('');
           }
@@ -254,7 +256,7 @@ export default function ClockInOut({ business, onBack }: Props) {
     if (!matchedEmployee || isProcessing) return;
     
     if (!isWithinRange) {
-      setMessage('You must be within 1 mile of the business to clock in.');
+      setMessage(`You must be within ${MAX_DISTANCE_METERS}m of the business to clock in.`);
       return;
     }
 
@@ -285,7 +287,7 @@ export default function ClockInOut({ business, onBack }: Props) {
     if (!matchedEmployee || isProcessing) return;
     
     if (!isWithinRange) {
-      setMessage('You must be within 1 mile of the business to clock out.');
+      setMessage(`You must be within ${MAX_DISTANCE_METERS}m of the business to clock out.`);
       return;
     }
 
@@ -411,7 +413,7 @@ export default function ClockInOut({ business, onBack }: Props) {
                           <p className="text-green-400/70 text-sm">
                             {distanceFromBusiness < 0.1 
                               ? 'You are at the business location' 
-                              : `${distanceFromBusiness.toFixed(2)} miles away`}
+                              : `${Math.round(distanceFromBusiness * 1609.34)}m away`}
                           </p>
                         )}
                       </>

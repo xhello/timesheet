@@ -210,7 +210,7 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
                 <div>
                   <p className="text-green-700 text-sm font-medium">Location captured</p>
                   <p className="text-green-600 text-xs">
-                    Employees must clock in/out within 1 mile of this location
+                    Employees must clock in/out within 500m of this location
                   </p>
                 </div>
               </>
