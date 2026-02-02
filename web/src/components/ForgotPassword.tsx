@@ -80,12 +80,20 @@ export default function ForgotPassword({ onBack }: Props) {
       const passwordHash = await hashPassword(newPassword);
 
       // Update password in database
-      const { error } = await supabase
+      const { error, data } = await supabase
         .from('businesses')
         .update({ password_hash: passwordHash })
-        .eq('business_code', businessId);
+        .eq('business_code', businessId)
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw new Error(error.message || 'Database update failed');
+      }
+      
+      if (!data || data.length === 0) {
+        throw new Error('Business not found or update failed');
+      }
 
       // Send confirmation email
       try {
@@ -107,8 +115,9 @@ export default function ForgotPassword({ onBack }: Props) {
       setMessage('Password reset successfully! You can now login with your new password.');
     } catch (err) {
       setIsSuccess(false);
-      setMessage('Failed to reset password. Please try again.');
-      console.error(err);
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      setMessage(`Failed to reset password: ${errorMsg}`);
+      console.error('Password reset error:', err);
     } finally {
       setIsLoading(false);
     }
