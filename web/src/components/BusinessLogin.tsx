@@ -1,23 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { getBusinessByCode, verifyPassword, Business } from '@/lib/supabase';
+import { getBusinessByCode, Business } from '@/lib/supabase';
 
 interface Props {
   onLoginSuccess: (business: Business) => void;
   onSignUpClick: () => void;
   onForgotIdClick: () => void;
-  onForgotPasswordClick: () => void;
 }
 
-export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotIdClick, onForgotPasswordClick }: Props) {
+export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotIdClick }: Props) {
   const [businessCode, setBusinessCode] = useState('');
-  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleLogin = async () => {
-    if (!businessCode.trim() || !password) return;
+    if (!businessCode.trim()) return;
     
     setIsLoading(true);
     setError('');
@@ -30,19 +28,7 @@ export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotI
         return;
       }
 
-      // Verify password
-      if (!business.password_hash) {
-        // Legacy business without password - allow login (or you can block it)
-        onLoginSuccess(business);
-        return;
-      }
-
-      const isValid = await verifyPassword(password, business.password_hash);
-      if (isValid) {
-        onLoginSuccess(business);
-      } else {
-        setError('Invalid password. Please try again.');
-      }
+      onLoginSuccess(business);
     } catch (err) {
       setError('Failed to connect. Please try again.');
       console.error(err);
@@ -72,18 +58,6 @@ export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotI
             placeholder="Enter Business ID (e.g., ABC123)"
             className="w-full px-4 py-4 text-2xl font-mono text-center bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 tracking-widest"
             maxLength={6}
-          />
-        </div>
-
-        {/* Password Input */}
-        <div>
-          <label className="block text-white font-semibold mb-2">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password"
-            className="w-full px-4 py-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
           />
         </div>
@@ -98,7 +72,7 @@ export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotI
         {/* Login Button */}
         <button
           onClick={handleLogin}
-          disabled={!businessCode.trim() || !password || isLoading}
+          disabled={!businessCode.trim() || isLoading}
           className="w-full py-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-500 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
         >
           {isLoading ? (
@@ -130,24 +104,14 @@ export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotI
           <span>Register New Business</span>
         </button>
 
-        {/* Forgot Buttons */}
-        <div className="flex justify-center gap-4">
-          <button
-            onClick={onForgotIdClick}
-            className="py-2 text-white/70 hover:text-white text-sm transition-colors flex items-center gap-1"
-          >
-            <span>❓</span>
-            <span>Forgot ID?</span>
-          </button>
-          <span className="text-white/30">|</span>
-          <button
-            onClick={onForgotPasswordClick}
-            className="py-2 text-white/70 hover:text-white text-sm transition-colors flex items-center gap-1"
-          >
-            <span>🔑</span>
-            <span>Forgot Password?</span>
-          </button>
-        </div>
+        {/* Forgot Business ID */}
+        <button
+          onClick={onForgotIdClick}
+          className="w-full py-2 text-white/70 hover:text-white text-sm transition-colors flex items-center justify-center gap-1"
+        >
+          <span>❓</span>
+          <span>Forgot Business ID?</span>
+        </button>
       </div>
 
       {/* Footer */}

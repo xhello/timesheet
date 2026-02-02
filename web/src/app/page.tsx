@@ -4,12 +4,11 @@ import { useState, useEffect } from 'react';
 import BusinessLogin from '@/components/BusinessLogin';
 import BusinessSignUp from '@/components/BusinessSignUp';
 import ForgotBusinessID from '@/components/ForgotBusinessID';
-import ForgotPassword from '@/components/ForgotPassword';
 import EmployeeHome from '@/components/EmployeeHome';
 import { Business } from '@/lib/supabase';
 import { preloadFaceModels } from '@/lib/faceDetection';
 
-type View = 'login' | 'signup' | 'forgot-id' | 'forgot-password' | 'employee-home';
+type View = 'login' | 'signup' | 'forgot-id' | 'employee-home';
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<View>('login');
@@ -37,7 +36,6 @@ export default function Home() {
           onLoginSuccess={handleLoginSuccess}
           onSignUpClick={() => setCurrentView('signup')}
           onForgotIdClick={() => setCurrentView('forgot-id')}
-          onForgotPasswordClick={() => setCurrentView('forgot-password')}
         />
       )}
       
@@ -50,12 +48,6 @@ export default function Home() {
       
       {currentView === 'forgot-id' && (
         <ForgotBusinessID
-          onBack={() => setCurrentView('login')}
-        />
-      )}
-
-      {currentView === 'forgot-password' && (
-        <ForgotPassword
           onBack={() => setCurrentView('login')}
         />
       )}
