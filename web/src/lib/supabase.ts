@@ -217,6 +217,87 @@ export async function getBusinessById(businessId: string): Promise<Business | nu
   return data;
 }
 
+// Time Change Request interface and operations
+export interface TimeChangeRequest {
+  id: string;
+  time_entry_id: string;
+  employee_id: string;
+  business_id: string;
+  original_clock_in: string;
+  original_clock_out: string | null;
+  requested_clock_in: string;
+  requested_clock_out: string | null;
+  reason: string;
+  status: 'pending' | 'approved' | 'declined';
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export async function createTimeChangeRequest(request: Partial<TimeChangeRequest>): Promise<TimeChangeRequest> {
+  const { data, error } = await supabase
+    .from('time_change_requests')
+    .insert(request)
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+export async function getTimeChangeRequestsByBusiness(businessId: string): Promise<TimeChangeRequest[]> {
+  const { data, error } = await supabase
+    .from('time_change_requests')
+    .select('*')
+    .eq('business_id', businessId)
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getPendingTimeChangeRequests(businessId: string): Promise<TimeChangeRequest[]> {
+  const { data, error } = await supabase
+    .from('time_change_requests')
+    .select('*')
+    .eq('business_id', businessId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data || [];
+}
+
+export async function approveTimeChangeRequest(requestId: string, timeEntryId: string, newClockIn: string, newClockOut: string | null): Promise<void> {
+  // Update the time entry
+  await supabase
+    .from('time_entries')
+    .update({
+      clock_in_time: newClockIn,
+      clock_out_time: newClockOut,
+      status: 'edited',
+    })
+    .eq('id', timeEntryId);
+  
+  // Update the request status
+  await supabase
+    .from('time_change_requests')
+    .update({
+      status: 'approved',
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq('id', requestId);
+}
+
+export async function declineTimeChangeRequest(requestId: string): Promise<void> {
+  await supabase
+    .from('time_change_requests')
+    .update({
+      status: 'declined',
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq('id', requestId);
+}
+
 // Generate business code
 export function generateBusinessCode(): string {
   const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

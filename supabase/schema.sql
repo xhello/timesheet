@@ -96,12 +96,45 @@ CREATE INDEX idx_time_entries_clock_in ON time_entries(clock_in_time);
 CREATE INDEX idx_time_entries_status ON time_entries(status);
 
 -- ============================================
+-- TIME CHANGE REQUESTS TABLE
+-- ============================================
+DROP TABLE IF EXISTS time_change_requests CASCADE;
+
+CREATE TABLE time_change_requests (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    time_entry_id UUID NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    
+    -- Original times
+    original_clock_in TIMESTAMPTZ NOT NULL,
+    original_clock_out TIMESTAMPTZ,
+    
+    -- Requested times
+    requested_clock_in TIMESTAMPTZ NOT NULL,
+    requested_clock_out TIMESTAMPTZ,
+    
+    -- Request details
+    reason TEXT NOT NULL,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'declined')),
+    reviewed_at TIMESTAMPTZ,
+    
+    -- Timestamps
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_time_change_requests_business ON time_change_requests(business_id);
+CREATE INDEX idx_time_change_requests_employee ON time_change_requests(employee_id);
+CREATE INDEX idx_time_change_requests_status ON time_change_requests(status);
+
+-- ============================================
 -- ROW LEVEL SECURITY - Allow anonymous access
 -- ============================================
 
 ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE time_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE time_change_requests ENABLE ROW LEVEL SECURITY;
 
 -- Businesses: Allow all operations
 CREATE POLICY "businesses_all" ON businesses FOR ALL USING (true) WITH CHECK (true);
@@ -111,6 +144,9 @@ CREATE POLICY "employees_all" ON employees FOR ALL USING (true) WITH CHECK (true
 
 -- Time Entries: Allow all operations
 CREATE POLICY "time_entries_all" ON time_entries FOR ALL USING (true) WITH CHECK (true);
+
+-- Time Change Requests: Allow all operations
+CREATE POLICY "time_change_requests_all" ON time_change_requests FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================
 -- FUNCTIONS

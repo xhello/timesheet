@@ -8,6 +8,7 @@ import {
   getAllEmployees,
   getTimeEntriesByEmployee,
   getBusinessById,
+  createTimeChangeRequest,
 } from '@/lib/supabase';
 import {
   loadFaceModels,
@@ -320,6 +321,65 @@ function EmployeeDashboard({
   const [startDate, setStartDate] = useState(firstDayOfMonth.toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
 
+  // Edit modal state
+  const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
+  const [editClockIn, setEditClockIn] = useState('');
+  const [editClockOut, setEditClockOut] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  const openEditModal = (entry: TimeEntry) => {
+    setEditingEntry(entry);
+    // Format datetime for input
+    const clockInDate = new Date(entry.clock_in_time);
+    setEditClockIn(clockInDate.toISOString().slice(0, 16));
+    if (entry.clock_out_time) {
+      const clockOutDate = new Date(entry.clock_out_time);
+      setEditClockOut(clockOutDate.toISOString().slice(0, 16));
+    } else {
+      setEditClockOut('');
+    }
+    setEditReason('');
+    setSubmitSuccess(false);
+  };
+
+  const closeEditModal = () => {
+    setEditingEntry(null);
+    setEditClockIn('');
+    setEditClockOut('');
+    setEditReason('');
+    setSubmitSuccess(false);
+  };
+
+  const handleSubmitChangeRequest = async () => {
+    if (!editingEntry || !business || !editReason.trim()) return;
+    
+    setIsSubmitting(true);
+    try {
+      await createTimeChangeRequest({
+        time_entry_id: editingEntry.id,
+        employee_id: employee.id,
+        business_id: business.id,
+        original_clock_in: editingEntry.clock_in_time,
+        original_clock_out: editingEntry.clock_out_time,
+        requested_clock_in: new Date(editClockIn).toISOString(),
+        requested_clock_out: editClockOut ? new Date(editClockOut).toISOString() : null,
+        reason: editReason.trim(),
+        status: 'pending',
+      });
+      setSubmitSuccess(true);
+      setTimeout(() => {
+        closeEditModal();
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to submit change request:', error);
+      alert('Failed to submit request. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Filter entries by date range
   const filteredEntries = timeEntries.filter(entry => {
     const entryDate = new Date(entry.clock_in_time);
@@ -535,13 +595,13 @@ function EmployeeDashboard({
             <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
               {filteredEntries.map((entry) => (
                 <div key={entry.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
-                  <div>
+                  <div className="flex-1">
                     <p className="font-medium text-gray-900">{formatDate(entry.clock_in_time)}</p>
                     <p className="text-sm text-gray-500">
                       {formatTime(entry.clock_in_time)} - {entry.clock_out_time ? formatTime(entry.clock_out_time) : 'In Progress'}
                     </p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right mr-4">
                     <p className={`font-semibold ${entry.clock_out_time ? 'text-gray-900' : 'text-green-600'}`}>
                       {calculateDuration(entry.clock_in_time, entry.clock_out_time)}
                     </p>
@@ -550,17 +610,114 @@ function EmployeeDashboard({
                         ? 'bg-green-100 text-green-700' 
                         : entry.status === 'completed'
                           ? 'bg-gray-100 text-gray-600'
-                          : 'bg-yellow-100 text-yellow-700'
+                          : entry.status === 'edited'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-yellow-100 text-yellow-700'
                     }`}>
                       {entry.status}
                     </p>
                   </div>
+                  <button
+                    onClick={() => openEditModal(entry)}
+                    className="px-3 py-1.5 text-sm bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors"
+                  >
+                    Request Change
+                  </button>
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Edit Modal */}
+      {editingEntry && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
+            {submitSuccess ? (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">✓</span>
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Request Submitted!</h3>
+                <p className="text-gray-600">Your time change request has been sent to admin for review.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-gray-900">Request Time Change</h3>
+                  <button
+                    onClick={closeEditModal}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 mb-1">Original Time</p>
+                    <p className="text-sm font-medium text-gray-700">
+                      {formatDate(editingEntry.clock_in_time)}: {formatTime(editingEntry.clock_in_time)} - {editingEntry.clock_out_time ? formatTime(editingEntry.clock_out_time) : 'In Progress'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">New Clock In</label>
+                    <input
+                      type="datetime-local"
+                      value={editClockIn}
+                      onChange={(e) => setEditClockIn(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">New Clock Out</label>
+                    <input
+                      type="datetime-local"
+                      value={editClockOut}
+                      onChange={(e) => setEditClockOut(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Reason for Change *</label>
+                    <textarea
+                      value={editReason}
+                      onChange={(e) => setEditReason(e.target.value)}
+                      placeholder="Please explain why you need this time change..."
+                      rows={3}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={closeEditModal}
+                      className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSubmitChangeRequest}
+                      disabled={!editReason.trim() || isSubmitting}
+                      className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+                    >
+                      {isSubmitting ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        'Submit Request'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
