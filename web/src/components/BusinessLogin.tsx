@@ -6,10 +6,11 @@ import { getBusinessByCode, verifyPassword, Business } from '@/lib/supabase';
 interface Props {
   onLoginSuccess: (business: Business) => void;
   onSignUpClick: () => void;
-  onForgotClick: () => void;
+  onForgotIdClick: () => void;
+  onForgotPasswordClick: () => void;
 }
 
-export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotClick }: Props) {
+export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotIdClick, onForgotPasswordClick }: Props) {
   const [businessCode, setBusinessCode] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -129,14 +130,24 @@ export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotC
           <span>Register New Business</span>
         </button>
 
-        {/* Forgot ID Button */}
-        <button
-          onClick={onForgotClick}
-          className="w-full py-2 text-white/70 hover:text-white text-sm transition-colors flex items-center justify-center gap-2"
-        >
-          <span>❓</span>
-          <span>Forgot Business ID?</span>
-        </button>
+        {/* Forgot Buttons */}
+        <div className="flex justify-center gap-4">
+          <button
+            onClick={onForgotIdClick}
+            className="py-2 text-white/70 hover:text-white text-sm transition-colors flex items-center gap-1"
+          >
+            <span>❓</span>
+            <span>Forgot ID?</span>
+          </button>
+          <span className="text-white/30">|</span>
+          <button
+            onClick={onForgotPasswordClick}
+            className="py-2 text-white/70 hover:text-white text-sm transition-colors flex items-center gap-1"
+          >
+            <span>🔑</span>
+            <span>Forgot Password?</span>
+          </button>
+        </div>
       </div>
 
       {/* Footer */}
