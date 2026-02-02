@@ -93,6 +93,7 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
   const [message, setMessage] = useState('Loading...');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [matchStreak, setMatchStreak] = useState(0);
+  const [loadingProgress, setLoadingProgress] = useState(0);
 
   useEffect(() => {
     employeesRef.current = employees;
@@ -116,17 +117,26 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
 
     const init = async () => {
       try {
-        setMessage('Initializing...');
+        setLoadingProgress(10);
+        setMessage('Starting camera...');
         
-        // Start ALL tasks in parallel - don't await anything sequentially
-        const [, , emps] = await Promise.all([
-          loadFaceModels(),
-          startCamera(),
-          getAllEmployees(),
-        ]);
+        // Start camera first
+        await startCamera();
+        if (!mounted) return;
+        setLoadingProgress(30);
         
+        // Load face models
+        setMessage('Loading face detection models...');
+        await loadFaceModels();
+        if (!mounted) return;
+        setLoadingProgress(70);
+        
+        // Load employees
+        setMessage('Loading employee data...');
+        const emps = await getAllEmployees();
         if (!mounted) return;
         setEmployees(emps);
+        setLoadingProgress(100);
         
         if (emps.length === 0) {
           setStatus('error');
@@ -244,6 +254,22 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
 
       {/* Camera View */}
       <div className="flex-1 flex flex-col items-center justify-center p-4">
+        {/* Loading Progress Bar */}
+        {status === 'loading' && (
+          <div className="w-full max-w-md mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-white/80">{message}</span>
+              <span className="text-sm text-white/60">{loadingProgress}%</span>
+            </div>
+            <div className="w-full h-2 bg-white/20 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-300 ease-out"
+                style={{ width: `${loadingProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="relative w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden shadow-2xl">
           <video
             ref={videoRef}

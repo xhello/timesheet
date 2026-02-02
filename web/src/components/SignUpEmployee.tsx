@@ -39,6 +39,7 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [confirmCountdown, setConfirmCountdown] = useState(1);
   const [canConfirm, setCanConfirm] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
 
   // Form state
   const [firstName, setFirstName] = useState('');
@@ -52,18 +53,26 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
   useEffect(() => {
     const init = async () => {
       try {
-        // Start camera and load employees in parallel with models
+        setLoadingProgress(10);
+        setMessage('Starting camera...');
+        
+        // Start camera
         const cameraPromise = startCamera();
-        const employeesPromise = getEmployeesByBusiness(business.id);
+        setLoadingProgress(30);
         
-        setMessage('Initializing camera...');
-        
-        // Load models (will be instant if already preloaded)
+        // Load face models
+        setMessage('Loading face detection models...');
         await loadFaceModels();
+        setLoadingProgress(70);
+        
+        // Load employees
+        setMessage('Loading employee data...');
+        const employeesPromise = getEmployeesByBusiness(business.id);
         
         // Wait for camera and employees
         const [, emps] = await Promise.all([cameraPromise, employeesPromise]);
         setEmployees(emps);
+        setLoadingProgress(100);
         
         setStatus('capturing');
         setMessage('Position your face in the frame');
@@ -511,7 +520,23 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
       {/* Main Content - Side by Side Layout */}
       <div className="flex-1 flex flex-col lg:flex-row p-4 gap-6">
         {/* Left Side - Camera View */}
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-1 flex flex-col items-center justify-center">
+          {/* Loading Progress Bar */}
+          {status === 'loading' && (
+            <div className="w-full max-w-lg mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-white/80">{message}</span>
+                <span className="text-sm text-white/60">{loadingProgress}%</span>
+              </div>
+              <div className="w-full h-2 bg-white/20 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-green-500 to-emerald-500 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${loadingProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="relative w-full max-w-lg aspect-[3/4] bg-black rounded-2xl overflow-hidden">
             <video
               ref={videoRef}
