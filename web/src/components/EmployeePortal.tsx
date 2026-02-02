@@ -103,34 +103,28 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
     let mounted = true;
     
     const startCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: 640, height: 480 },
-        });
-        
-        if (videoRef.current && mounted) {
-          videoRef.current.srcObject = stream;
-          streamRef.current = stream;
-        }
-      } catch (error) {
-        console.error('Camera error:', error);
-        throw new Error('Camera access denied');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: 640, height: 480 },
+      });
+      
+      if (videoRef.current && mounted) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
       }
+      return stream;
     };
 
     const init = async () => {
       try {
-        setMessage('Initializing camera...');
+        setMessage('Initializing...');
         
-        // Start camera and load employees in parallel with models
-        const cameraPromise = startCamera();
-        const employeesPromise = getAllEmployees();
+        // Start ALL tasks in parallel - don't await anything sequentially
+        const [, , emps] = await Promise.all([
+          loadFaceModels(),
+          startCamera(),
+          getAllEmployees(),
+        ]);
         
-        // Load models (will be instant if already preloaded)
-        await loadFaceModels();
-        
-        // Wait for camera and employees
-        const [, emps] = await Promise.all([cameraPromise, employeesPromise]);
         if (!mounted) return;
         setEmployees(emps);
         
@@ -140,7 +134,6 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
           return;
         }
         
-        if (!mounted) return;
         setStatus('ready');
         setMessage('Position your face to authenticate');
       } catch (error) {

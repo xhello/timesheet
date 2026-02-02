@@ -412,3 +412,13 @@ export function descriptorToObject(descriptor: Float32Array): Record<string, num
   });
   return obj;
 }
+
+// Auto-preload models when this module is imported on the client
+// This starts loading immediately when any page imports faceDetection
+if (typeof window !== 'undefined') {
+  // Use requestIdleCallback for non-blocking preload, fallback to setTimeout
+  const schedulePreload = window.requestIdleCallback || ((cb: () => void) => setTimeout(cb, 1));
+  schedulePreload(() => {
+    preloadFaceModels();
+  });
+}
