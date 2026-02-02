@@ -14,6 +14,7 @@ import {
   detectFace,
   findMatchingEmployee,
   descriptorToObject,
+  MIN_LIVENESS_SCORE,
 } from '@/lib/faceDetection';
 
 interface Props {
@@ -189,7 +190,7 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
 
       const result = await detectFace(videoRef.current);
 
-      if (result.detected && result.descriptor && result.livenessScore >= 0.5) {
+      if (result.detected && result.descriptor && result.livenessScore >= MIN_LIVENESS_SCORE) {
         // Check if face already exists
         const match = findMatchingEmployee(result.descriptor, employees);
 

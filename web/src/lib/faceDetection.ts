@@ -6,8 +6,8 @@ let modelsLoaded = false;
 let modelsLoading: Promise<void> | null = null;
 
 // Match threshold - lower = stricter matching (less false positives)
-// Increased from 0.45 to 0.5 for faster matching
-const MATCH_THRESHOLD = 0.5;
+// Increased to 0.55 for easier detection of existing faces
+const MATCH_THRESHOLD = 0.55;
 
 // Minimum consecutive matches required before confirming identity
 const REQUIRED_CONSECUTIVE_MATCHES = 1;
