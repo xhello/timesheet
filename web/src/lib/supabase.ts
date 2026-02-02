@@ -15,9 +15,25 @@ export interface Business {
   timezone: string;
   latitude: number | null;
   longitude: number | null;
+  password_hash: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// Simple password hashing using Web Crypto API
+export async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Verify password
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  const passwordHash = await hashPassword(password);
+  return passwordHash === hash;
 }
 
 // Calculate distance between two coordinates in miles (Haversine formula)

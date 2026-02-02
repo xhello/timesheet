@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createBusiness, generateBusinessCode, getBusinessByCode } from '@/lib/supabase';
+import { createBusiness, generateBusinessCode, getBusinessByCode, hashPassword } from '@/lib/supabase';
 
 interface Props {
   onBack: () => void;
@@ -11,6 +11,8 @@ interface Props {
 export default function BusinessSignUp({ onBack, onSuccess }: Props) {
   const [businessName, setBusinessName] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
@@ -53,6 +55,14 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
 
   const handleRegister = async () => {
     if (!businessName.trim() || !email.trim() || !isValidEmail(email)) return;
+    if (!password || password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
     if (!location) {
       setError('Location is required. Please enable location services and refresh.');
       return;
@@ -74,13 +84,17 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
 
       setGeneratedCode(code);
 
-      // Create business in Supabase with location
+      // Hash password
+      const passwordHash = await hashPassword(password);
+
+      // Create business in Supabase with location and password
       await createBusiness({
         business_code: code,
         name: businessName.trim(),
         email: email.toLowerCase().trim(),
         latitude: location.latitude,
         longitude: location.longitude,
+        password_hash: passwordHash,
       });
 
       // Send email with business code
@@ -220,6 +234,39 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
           />
         </div>
 
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Password (min 6 characters)
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter password"
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Confirm Password
+          </label>
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Confirm password"
+            className={`w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 ${
+              confirmPassword && password !== confirmPassword 
+                ? 'border-red-300 bg-red-50' 
+                : 'border-gray-300'
+            }`}
+          />
+          {confirmPassword && password !== confirmPassword && (
+            <p className="text-red-500 text-xs mt-1">Passwords do not match</p>
+          )}
+        </div>
+
         {/* Location Status */}
         <div className={`rounded-xl p-4 ${
           locationLoading 
@@ -268,7 +315,7 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
 
         <button
           onClick={handleRegister}
-          disabled={!businessName.trim() || !email.trim() || !isValidEmail(email) || isLoading || !location}
+          disabled={!businessName.trim() || !email.trim() || !isValidEmail(email) || !password || password.length < 6 || password !== confirmPassword || isLoading || !location}
           className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
         >
           {isLoading ? (

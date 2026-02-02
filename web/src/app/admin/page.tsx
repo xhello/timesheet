@@ -6,6 +6,7 @@ import {
   Employee,
   TimeChangeRequest,
   getBusinessByCode,
+  verifyPassword,
   getPendingTimeChangeRequests,
   getTimeChangeRequestsByBusiness,
   getEmployeeById,
@@ -39,22 +40,36 @@ export default function AdminPage() {
 // Admin Login Component
 function AdminLogin({ onLogin }: { onLogin: (business: Business) => void }) {
   const [businessCode, setBusinessCode] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!businessCode.trim()) return;
+    if (!businessCode.trim() || !password) return;
 
     setIsLoading(true);
     setError('');
 
     try {
       const business = await getBusinessByCode(businessCode);
-      if (business) {
+      if (!business) {
+        setError('Business ID not found.');
+        return;
+      }
+
+      // Verify password
+      if (!business.password_hash) {
+        // Legacy business without password
+        onLogin(business);
+        return;
+      }
+
+      const isValid = await verifyPassword(password, business.password_hash);
+      if (isValid) {
         onLogin(business);
       } else {
-        setError('Business ID not found.');
+        setError('Invalid password.');
       }
     } catch (err) {
       setError('Failed to connect. Please try again.');
@@ -70,7 +85,7 @@ function AdminLogin({ onLogin }: { onLogin: (business: Business) => void }) {
         <div className="text-center mb-8">
           <div className="text-5xl mb-4">🔐</div>
           <h1 className="text-3xl font-bold text-white mb-2">Admin Portal</h1>
-          <p className="text-slate-400">Enter your Business ID to manage time change requests</p>
+          <p className="text-slate-400">Enter your Business ID and password to manage time change requests</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white/10 backdrop-blur rounded-2xl p-8 space-y-6">
@@ -86,6 +101,17 @@ function AdminLogin({ onLogin }: { onLogin: (business: Business) => void }) {
             />
           </div>
 
+          <div>
+            <label className="block text-white font-medium mb-2">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
+              className="w-full px-4 py-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
+            />
+          </div>
+
           {error && (
             <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-3 text-center">
               <p className="text-red-200 text-sm">{error}</p>
@@ -94,7 +120,7 @@ function AdminLogin({ onLogin }: { onLogin: (business: Business) => void }) {
 
           <button
             type="submit"
-            disabled={!businessCode.trim() || isLoading}
+            disabled={!businessCode.trim() || !password || isLoading}
             className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
           >
             {isLoading ? (

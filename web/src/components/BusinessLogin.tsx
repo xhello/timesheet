@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { getBusinessByCode, Business } from '@/lib/supabase';
+import { getBusinessByCode, verifyPassword, Business } from '@/lib/supabase';
 
 interface Props {
   onLoginSuccess: (business: Business) => void;
@@ -11,11 +11,12 @@ interface Props {
 
 export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotClick }: Props) {
   const [businessCode, setBusinessCode] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleLogin = async () => {
-    if (!businessCode.trim()) return;
+    if (!businessCode.trim() || !password) return;
     
     setIsLoading(true);
     setError('');
@@ -23,10 +24,23 @@ export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotC
     try {
       const business = await getBusinessByCode(businessCode);
       
-      if (business) {
+      if (!business) {
+        setError('Business ID not found. Please check and try again.');
+        return;
+      }
+
+      // Verify password
+      if (!business.password_hash) {
+        // Legacy business without password - allow login (or you can block it)
+        onLoginSuccess(business);
+        return;
+      }
+
+      const isValid = await verifyPassword(password, business.password_hash);
+      if (isValid) {
         onLoginSuccess(business);
       } else {
-        setError('Business ID not found. Please check and try again.');
+        setError('Invalid password. Please try again.');
       }
     } catch (err) {
       setError('Failed to connect. Please try again.');
@@ -60,6 +74,19 @@ export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotC
           />
         </div>
 
+        {/* Password Input */}
+        <div>
+          <label className="block text-white font-semibold mb-2">Password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter password"
+            className="w-full px-4 py-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+          />
+        </div>
+
         {/* Error Message */}
         {error && (
           <div className="bg-red-500/20 border border-red-400/50 rounded-lg p-3 text-center">
@@ -70,7 +97,7 @@ export default function BusinessLogin({ onLoginSuccess, onSignUpClick, onForgotC
         {/* Login Button */}
         <button
           onClick={handleLogin}
-          disabled={!businessCode.trim() || isLoading}
+          disabled={!businessCode.trim() || !password || isLoading}
           className="w-full py-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-500 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
         >
           {isLoading ? (
