@@ -420,7 +420,9 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
         request.id,
         request.time_entry_id,
         request.requested_clock_in,
-        request.requested_clock_out
+        request.requested_clock_out,
+        request.employee_id,
+        request.business_id
       );
       await loadRequests();
     } catch (error) {
@@ -429,6 +431,11 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     } finally {
       setProcessingId(null);
     }
+  };
+
+  // Check if request is for adding new hours
+  const isAddHoursRequest = (request: TimeChangeRequest) => {
+    return !request.time_entry_id || !request.original_clock_in;
   };
 
   const handleDecline = async (request: TimeChangeRequest) => {
@@ -658,20 +665,48 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div className="bg-red-50 rounded-lg p-3">
-                          <p className="text-xs text-red-600 font-medium mb-1">Original Time</p>
-                          <p className="text-sm text-gray-700">
-                            {formatDateTime(request.original_clock_in)} - {request.original_clock_out ? formatDateTime(request.original_clock_out) : 'N/A'}
-                          </p>
+                      {isAddHoursRequest(request) ? (
+                        // Add Hours Request - show only requested time
+                        <div className="mb-4">
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                            <p className="text-xs text-blue-600 font-medium mb-1">➕ Add Hours Request</p>
+                            <p className="text-sm text-blue-700">Employee is requesting to add new time entry</p>
+                          </div>
+                          <div className="bg-green-50 rounded-lg p-3">
+                            <p className="text-xs text-green-600 font-medium mb-1">Requested Time</p>
+                            <p className="text-sm text-gray-700">
+                              {formatDateTime(request.requested_clock_in)} - {request.requested_clock_out ? formatDateTime(request.requested_clock_out) : 'N/A'}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Duration: {(() => {
+                                if (!request.requested_clock_out) return 'N/A';
+                                const start = new Date(request.requested_clock_in);
+                                const end = new Date(request.requested_clock_out);
+                                const diffMs = end.getTime() - start.getTime();
+                                const hours = Math.floor(diffMs / (1000 * 60 * 60));
+                                const minutes = Math.round((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                                return `${hours}h ${minutes}m`;
+                              })()}
+                            </p>
+                          </div>
                         </div>
-                        <div className="bg-green-50 rounded-lg p-3">
-                          <p className="text-xs text-green-600 font-medium mb-1">Requested Time</p>
-                          <p className="text-sm text-gray-700">
-                            {formatDateTime(request.requested_clock_in)} - {request.requested_clock_out ? formatDateTime(request.requested_clock_out) : 'N/A'}
-                          </p>
+                      ) : (
+                        // Edit Request - show original and requested
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                          <div className="bg-red-50 rounded-lg p-3">
+                            <p className="text-xs text-red-600 font-medium mb-1">Original Time</p>
+                            <p className="text-sm text-gray-700">
+                              {request.original_clock_in ? formatDateTime(request.original_clock_in) : 'N/A'} - {request.original_clock_out ? formatDateTime(request.original_clock_out) : 'N/A'}
+                            </p>
+                          </div>
+                          <div className="bg-green-50 rounded-lg p-3">
+                            <p className="text-xs text-green-600 font-medium mb-1">Requested Time</p>
+                            <p className="text-sm text-gray-700">
+                              {formatDateTime(request.requested_clock_in)} - {request.requested_clock_out ? formatDateTime(request.requested_clock_out) : 'N/A'}
+                            </p>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       <div className="bg-gray-50 rounded-lg p-3 mb-4">
                         <p className="text-xs text-gray-500 font-medium mb-1">Reason</p>

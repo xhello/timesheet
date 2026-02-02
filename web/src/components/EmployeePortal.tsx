@@ -342,6 +342,14 @@ function EmployeeDashboard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
+  // Add hours modal state
+  const [showAddHoursModal, setShowAddHoursModal] = useState(false);
+  const [addClockIn, setAddClockIn] = useState('');
+  const [addClockOut, setAddClockOut] = useState('');
+  const [addReason, setAddReason] = useState('');
+  const [addSubmitting, setAddSubmitting] = useState(false);
+  const [addSuccess, setAddSuccess] = useState(false);
+
   const openEditModal = (entry: TimeEntry) => {
     setEditingEntry(entry);
     // Format datetime for input
@@ -390,6 +398,54 @@ function EmployeeDashboard({
       alert('Failed to submit request. Please try again.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const openAddHoursModal = () => {
+    // Default to today's date with current time
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    setAddClockIn(`${dateStr}T09:00`);
+    setAddClockOut(`${dateStr}T17:00`);
+    setAddReason('');
+    setAddSuccess(false);
+    setShowAddHoursModal(true);
+  };
+
+  const closeAddHoursModal = () => {
+    setShowAddHoursModal(false);
+    setAddClockIn('');
+    setAddClockOut('');
+    setAddReason('');
+    setAddSuccess(false);
+  };
+
+  const handleSubmitAddHours = async () => {
+    if (!business || !addClockIn || !addClockOut || !addReason.trim()) return;
+    
+    setAddSubmitting(true);
+    try {
+      await createTimeChangeRequest({
+        time_entry_id: null, // null indicates this is an "add hours" request
+        employee_id: employee.id,
+        business_id: business.id,
+        original_clock_in: null, // null for add requests
+        original_clock_out: null,
+        requested_clock_in: new Date(addClockIn).toISOString(),
+        requested_clock_out: new Date(addClockOut).toISOString(),
+        reason: addReason.trim(),
+        status: 'pending',
+        request_type: 'add',
+      });
+      setAddSuccess(true);
+      setTimeout(() => {
+        closeAddHoursModal();
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to submit add hours request:', error);
+      alert('Failed to submit request. Please try again.');
+    } finally {
+      setAddSubmitting(false);
     }
   };
 
@@ -575,6 +631,17 @@ function EmployeeDashboard({
 
       {/* Main Content */}
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+        {/* Add Hours Button */}
+        <div className="flex justify-end">
+          <button
+            onClick={openAddHoursModal}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition-colors flex items-center gap-2"
+          >
+            <span>➕</span>
+            <span>Request to Add Hours</span>
+          </button>
+        </div>
+
         {/* Date Range Picker */}
         <div className="bg-white rounded-xl p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Select Date Range</h2>
@@ -800,6 +867,111 @@ function EmployeeDashboard({
                       className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
                     >
                       {isSubmitting ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        'Submit Request'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Add Hours Modal */}
+      {showAddHoursModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
+            {addSuccess ? (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">✓</span>
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Request Submitted!</h3>
+                <p className="text-gray-600">Your request to add hours has been sent to admin for review.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-gray-900">Request to Add Hours</h3>
+                  <button
+                    onClick={closeAddHoursModal}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="bg-blue-50 rounded-lg p-3">
+                    <p className="text-sm text-blue-700">
+                      📝 Use this to request hours for shifts you forgot to clock in/out, or for time worked remotely.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Clock In Time *</label>
+                    <input
+                      type="datetime-local"
+                      value={addClockIn}
+                      onChange={(e) => setAddClockIn(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Clock Out Time *</label>
+                    <input
+                      type="datetime-local"
+                      value={addClockOut}
+                      onChange={(e) => setAddClockOut(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900"
+                    />
+                  </div>
+
+                  {addClockIn && addClockOut && (
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500 mb-1">Duration</p>
+                      <p className="text-lg font-bold text-gray-900">
+                        {(() => {
+                          const start = new Date(addClockIn);
+                          const end = new Date(addClockOut);
+                          const diffMs = end.getTime() - start.getTime();
+                          if (diffMs < 0) return 'Invalid time range';
+                          const hours = Math.floor(diffMs / (1000 * 60 * 60));
+                          const minutes = Math.round((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                          return `${hours}h ${minutes}m`;
+                        })()}
+                      </p>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Reason *</label>
+                    <textarea
+                      value={addReason}
+                      onChange={(e) => setAddReason(e.target.value)}
+                      placeholder="Why are you requesting to add these hours? (e.g., forgot to clock in, worked remotely, etc.)"
+                      rows={3}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 resize-none text-gray-900"
+                    />
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={closeAddHoursModal}
+                      className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSubmitAddHours}
+                      disabled={!addClockIn || !addClockOut || !addReason.trim() || addSubmitting}
+                      className="flex-1 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+                    >
+                      {addSubmitting ? (
                         <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       ) : (
                         'Submit Request'

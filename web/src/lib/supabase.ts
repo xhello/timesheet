@@ -273,10 +273,10 @@ export async function getBusinessById(businessId: string): Promise<Business | nu
 // Time Change Request interface and operations
 export interface TimeChangeRequest {
   id: string;
-  time_entry_id: string;
+  time_entry_id: string | null; // null for "add hours" requests
   employee_id: string;
   business_id: string;
-  original_clock_in: string;
+  original_clock_in: string | null; // null for "add hours" requests
   original_clock_out: string | null;
   requested_clock_in: string;
   requested_clock_out: string | null;
@@ -284,6 +284,7 @@ export interface TimeChangeRequest {
   status: 'pending' | 'approved' | 'declined';
   reviewed_at: string | null;
   created_at: string;
+  request_type?: 'edit' | 'add'; // 'add' for new hours request
 }
 
 export async function createTimeChangeRequest(request: Partial<TimeChangeRequest>): Promise<TimeChangeRequest> {
@@ -320,16 +321,38 @@ export async function getPendingTimeChangeRequests(businessId: string): Promise<
   return data || [];
 }
 
-export async function approveTimeChangeRequest(requestId: string, timeEntryId: string, newClockIn: string, newClockOut: string | null): Promise<void> {
-  // Update the time entry
-  await supabase
-    .from('time_entries')
-    .update({
-      clock_in_time: newClockIn,
-      clock_out_time: newClockOut,
-      status: 'edited',
-    })
-    .eq('id', timeEntryId);
+export async function approveTimeChangeRequest(
+  requestId: string, 
+  timeEntryId: string | null, 
+  newClockIn: string, 
+  newClockOut: string | null,
+  employeeId?: string,
+  businessId?: string
+): Promise<void> {
+  if (timeEntryId) {
+    // Update existing time entry
+    await supabase
+      .from('time_entries')
+      .update({
+        clock_in_time: newClockIn,
+        clock_out_time: newClockOut,
+        status: 'edited',
+      })
+      .eq('id', timeEntryId);
+  } else if (employeeId && businessId) {
+    // Create new time entry for "add hours" request
+    await supabase
+      .from('time_entries')
+      .insert({
+        employee_id: employeeId,
+        business_id: businessId,
+        clock_in_time: newClockIn,
+        clock_out_time: newClockOut,
+        status: 'approved',
+        clock_in_liveness_verified: false,
+        clock_out_liveness_verified: false,
+      });
+  }
   
   // Update the request status
   await supabase
