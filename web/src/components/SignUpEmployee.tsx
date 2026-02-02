@@ -408,69 +408,83 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
     return (
       <div className="min-h-screen bg-gray-900 flex flex-col">
         {/* Header */}
-        <div className="px-4 py-4 flex items-center">
+        <div className="px-4 py-4 flex items-center border-b border-white/10">
           <button onClick={handleRetry} className="text-white/70 hover:text-white">
             ← Back
           </button>
-          <h1 className="flex-1 text-center text-white font-semibold">
+          <h1 className="flex-1 text-center text-white font-semibold text-xl">
             Confirm Photo
           </h1>
           <div className="w-12" />
         </div>
 
-        {/* Captured Image */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
-          <div className="relative w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden">
-            <img
-              src={capturedImage}
-              alt="Captured face"
-              className="w-full h-full object-cover"
-            />
+        {/* Main Content - Side by Side Layout */}
+        <div className="flex-1 flex flex-col lg:flex-row p-4 gap-6">
+          {/* Left Side - Captured Image */}
+          <div className="flex-1 flex items-center justify-center">
+            <div className="relative w-full max-w-lg aspect-[3/4] bg-black rounded-2xl overflow-hidden">
+              <img
+                src={capturedImage}
+                alt="Captured face"
+                className="w-full h-full object-cover"
+              />
 
-            {/* Face Guide Overlay */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-48 h-64 border-4 rounded-full border-yellow-500" />
-            </div>
+              {/* Face Guide Overlay */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-48 h-64 border-4 rounded-full border-green-500" />
+              </div>
 
-            {/* Status Badge */}
-            <div className="absolute top-4 left-1/2 -translate-x-1/2">
-              <div className="px-4 py-2 rounded-full text-white text-sm font-medium bg-yellow-500">
-                {canConfirm ? 'Is this you?' : `Please wait... ${confirmCountdown}s`}
+              {/* Status Badge */}
+              <div className="absolute top-4 left-1/2 -translate-x-1/2">
+                <div className="px-4 py-2 rounded-full text-white text-sm font-medium bg-green-500">
+                  {canConfirm ? 'Photo captured!' : `Processing... ${confirmCountdown}s`}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Confirmation Buttons */}
-          <div className="w-full max-w-md mt-6 space-y-3">
-            <p className="text-white/70 text-center mb-4">
-              Please confirm this is a clear photo of your face
-            </p>
-            
-            <button
-              onClick={handleConfirm}
-              disabled={!canConfirm}
-              className="w-full py-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold text-lg rounded-xl transition-colors flex items-center justify-center gap-2"
-            >
-              {canConfirm ? (
-                <>
-                  <span>✓</span>
-                  <span>Yes, this is me</span>
-                </>
-              ) : (
-                <>
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Wait {confirmCountdown}s...</span>
-                </>
-              )}
-            </button>
+          {/* Right Side - Confirmation Actions */}
+          <div className="lg:w-80 flex flex-col justify-center">
+            <div className="space-y-6">
+              {/* Confirmation Info */}
+              <div className="bg-white/5 rounded-2xl p-6 text-center">
+                <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">✓</span>
+                </div>
+                <p className="text-white font-bold text-lg mb-2">Is this you?</p>
+                <p className="text-white/60 text-sm">
+                  Please confirm this is a clear photo of your face
+                </p>
+              </div>
 
-            <button
-              onClick={handleRetry}
-              className="w-full py-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
-            >
-              <span>✗</span>
-              <span>No, retake photo</span>
-            </button>
+              {/* Confirm Button */}
+              <button
+                onClick={handleConfirm}
+                disabled={!canConfirm}
+                className="w-full py-5 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
+              >
+                {canConfirm ? (
+                  <>
+                    <span className="text-2xl">✓</span>
+                    <span>Yes, Continue</span>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Wait {confirmCountdown}s...</span>
+                  </>
+                )}
+              </button>
+
+              {/* Retake Button */}
+              <button
+                onClick={handleRetry}
+                className="w-full py-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                <span>🔄</span>
+                <span>No, Retake Photo</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -483,77 +497,130 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
       {/* Header */}
-      <div className="px-4 py-4 flex items-center">
+      <div className="px-4 py-4 flex items-center border-b border-white/10">
         <button onClick={onBack} className="text-white/70 hover:text-white">
           ← Back
         </button>
-        <h1 className="flex-1 text-center text-white font-semibold">
+        <h1 className="flex-1 text-center text-white font-semibold text-xl">
           New Employee
         </h1>
         <div className="w-12" />
       </div>
 
-      {/* Re-capture button - shown when face already registered */}
-      {existingEmployee && (
-        <div className="px-4 pb-4">
-          <button
-            onClick={handleRecapture}
-            className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
-          >
-            <span>🔄</span>
-            <span>Try Again with Different Face</span>
-          </button>
-        </div>
-      )}
+      {/* Main Content - Side by Side Layout */}
+      <div className="flex-1 flex flex-col lg:flex-row p-4 gap-6">
+        {/* Left Side - Camera View */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="relative w-full max-w-lg aspect-[3/4] bg-black rounded-2xl overflow-hidden">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover transform scale-x-[-1]"
+            />
 
-      {/* Camera View */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4">
-        <div className="relative w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover transform scale-x-[-1]"
-          />
+            {/* Face Guide Overlay */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className={`w-48 h-64 border-4 rounded-full ${
+                status === 'verified' 
+                  ? 'border-green-500' 
+                  : status === 'error' 
+                    ? 'border-red-500' 
+                    : 'border-white/50'
+              }`} />
+            </div>
 
-          {/* Face Guide Overlay */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className={`w-48 h-64 border-4 rounded-full ${
-              status === 'verified' 
-                ? 'border-green-500' 
-                : status === 'error' 
-                  ? 'border-red-500' 
-                  : 'border-white/50'
-            }`} />
-          </div>
-
-          {/* Status Badge */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2">
-            <div className={`px-4 py-2 rounded-full text-white text-sm font-medium ${
-              status === 'verified' 
-                ? 'bg-green-500' 
-                : status === 'error' 
-                  ? 'bg-red-500' 
-                  : 'bg-blue-500'
-            }`}>
-              {message}
+            {/* Status Badge */}
+            <div className="absolute top-4 left-1/2 -translate-x-1/2">
+              <div className={`px-4 py-2 rounded-full text-white text-sm font-medium ${
+                status === 'verified' 
+                  ? 'bg-green-500' 
+                  : status === 'error' 
+                    ? 'bg-red-500' 
+                    : 'bg-blue-500'
+              }`}>
+                {message}
+              </div>
             </div>
           </div>
         </div>
 
-        {existingEmployee && (
-          <div className="w-full max-w-md mt-6">
-            <div className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 text-center">
-              <p className="text-red-400">
-                This face is already registered to<br />
-                <span className="font-bold text-white">
+        {/* Right Side - Info & Actions */}
+        <div className="lg:w-80 flex flex-col justify-center">
+          {existingEmployee ? (
+            <div className="space-y-6">
+              {/* Existing Employee Warning */}
+              <div className="bg-red-500/20 border border-red-500/50 rounded-2xl p-6 text-center">
+                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">⚠️</span>
+                </div>
+                <p className="text-red-400 mb-2">Face Already Registered</p>
+                <p className="text-white font-bold text-lg">
                   {existingEmployee.first_name} {existingEmployee.last_name}
-                </span>
-              </p>
+                </p>
+              </div>
+
+              {/* Re-capture Button */}
+              <button
+                onClick={handleRecapture}
+                className="w-full py-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                <span>🔄</span>
+                <span>Try Again with Different Face</span>
+              </button>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="space-y-6">
+              {/* Instructions */}
+              <div className="bg-white/5 rounded-2xl p-6 text-center">
+                <div className="w-16 h-16 bg-blue-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">📸</span>
+                </div>
+                <p className="text-white font-bold text-lg mb-2">Face Capture</p>
+                <p className="text-white/60 text-sm">
+                  Position your face in the frame.<br />
+                  Look directly at the camera.
+                </p>
+              </div>
+
+              {/* Status Info */}
+              <div className={`rounded-xl p-4 ${
+                status === 'capturing' 
+                  ? 'bg-blue-500/20 border border-blue-500/30' 
+                  : status === 'loading'
+                    ? 'bg-yellow-500/20 border border-yellow-500/30'
+                    : 'bg-white/5 border border-white/10'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">
+                    {status === 'capturing' ? '👁️' : status === 'loading' ? '⏳' : '📷'}
+                  </span>
+                  <div>
+                    <p className="text-white font-medium">
+                      {status === 'capturing' ? 'Scanning...' : status === 'loading' ? 'Loading...' : 'Ready'}
+                    </p>
+                    <p className="text-white/60 text-sm">
+                      {status === 'capturing' 
+                        ? 'Hold still, detecting face' 
+                        : status === 'loading' 
+                          ? 'Initializing camera'
+                          : 'Waiting for face'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Back Button */}
+              <button
+                onClick={onBack}
+                className="w-full py-3 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Hidden canvas for capturing */}
