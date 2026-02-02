@@ -36,7 +36,7 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [existingEmployee, setExistingEmployee] = useState<Employee | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [confirmCountdown, setConfirmCountdown] = useState(3);
+  const [confirmCountdown, setConfirmCountdown] = useState(1);
   const [canConfirm, setCanConfirm] = useState(false);
 
   // Form state
@@ -141,7 +141,7 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
     // Reset state
     setCapturedDescriptor(null);
     setCapturedImage(null);
-    setConfirmCountdown(3);
+    setConfirmCountdown(1);
     setCanConfirm(false);
     setExistingEmployee(null);
     setMessage('Position your face in the frame');
@@ -161,7 +161,7 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
     // Reset all detection state
     setCapturedDescriptor(null);
     setCapturedImage(null);
-    setConfirmCountdown(3);
+    setConfirmCountdown(1);
     setCanConfirm(false);
     setExistingEmployee(null);
     setMessage('Position your face in the frame');
@@ -214,7 +214,7 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
           setCapturedDescriptor(result.descriptor);
           setStatus('confirming');
           setMessage('Is this you? Please confirm.');
-          setConfirmCountdown(3);
+          setConfirmCountdown(1);
           setCanConfirm(false);
           
           if (detectionIntervalRef.current) {

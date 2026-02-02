@@ -9,7 +9,7 @@ let modelsLoading: Promise<void> | null = null;
 const MATCH_THRESHOLD = 0.45;
 
 // Minimum consecutive matches required before confirming identity
-const REQUIRED_CONSECUTIVE_MATCHES = 3;
+const REQUIRED_CONSECUTIVE_MATCHES = 1;
 
 // Minimum face quality requirements
 const MIN_FACE_AREA = 15000; // pixels squared
