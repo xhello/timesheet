@@ -23,7 +23,7 @@ interface Props {
   onSuccess: () => void;
 }
 
-type Status = 'loading' | 'capturing' | 'confirming' | 'verified' | 'form' | 'error';
+type Status = 'loading' | 'warmup' | 'capturing' | 'confirming' | 'verified' | 'form' | 'error';
 
 export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -74,8 +74,8 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
         setEmployees(emps);
         setLoadingProgress(100);
         
-        setStatus('capturing');
-        setMessage('Position your face in the frame');
+        setStatus('warmup');
+        setMessage('Preparing face detection...');
       } catch (error) {
         console.error('Init error:', error);
         setStatus('error');
@@ -189,6 +189,33 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
       setMessage('Failed to restart camera. Please refresh.');
     }
   };
+
+  // Warmup: run one detection so first (slow) run doesn't freeze "Position your face"
+  useEffect(() => {
+    if (status !== 'warmup' || !videoRef.current) return;
+
+    let cancelled = false;
+
+    const runWarmup = () => {
+      detectFace(videoRef.current!).then(() => {
+        if (cancelled) return;
+        setStatus('capturing');
+        setMessage('Position your face in the frame');
+      }).catch(() => {
+        if (!cancelled) {
+          setStatus('capturing');
+          setMessage('Position your face in the frame');
+        }
+      });
+    };
+
+    const t = setTimeout(runWarmup, 50);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [status]);
 
   // Start face detection
   useEffect(() => {

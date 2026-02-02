@@ -24,7 +24,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Status = 'loading' | 'ready' | 'detecting' | 'verified' | 'error';
+type Status = 'loading' | 'ready' | 'warmup' | 'detecting' | 'verified' | 'error';
 
 const MAX_DISTANCE_METERS = 500; // Maximum distance allowed for clock in/out (in meters)
 const MAX_DISTANCE_MILES = MAX_DISTANCE_METERS / 1609.34; // Convert to miles for calculation
@@ -183,17 +183,52 @@ export default function ClockInOut({ business, onBack }: Props) {
     setStatus('ready');
   };
 
-  // Start face detection when ready
+  // Warmup: run one detection off main thread so first (slow) run doesn't freeze "Looking for your face"
   useEffect(() => {
-    // Allow both 'ready' and 'detecting' states
-    if ((status !== 'ready' && status !== 'detecting') || !videoRef.current) return;
-    if (matchedEmployee) return; // Already matched
-
-    // Only set to detecting on first run
-    if (status === 'ready') {
+    if (status !== 'warmup' || !videoRef.current) return;
+    const currentEmployees = employeesRef.current;
+    if (currentEmployees.length === 0) {
       setStatus('detecting');
       setMessage('Looking for your face...');
-      matchTrackerRef.current.reset();
+      return;
+    }
+
+    let cancelled = false;
+
+    const runWarmup = () => {
+      detectFace(videoRef.current!).then(() => {
+        if (cancelled) return;
+        setStatus('detecting');
+        setMessage('Looking for your face...');
+        matchTrackerRef.current.reset();
+      }).catch(() => {
+        if (!cancelled) {
+          setStatus('detecting');
+          setMessage('Looking for your face...');
+        }
+      });
+    };
+
+    // Let "Preparing..." paint first, then run warmup
+    const t = setTimeout(runWarmup, 50);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [status]);
+
+  // Start face detection when ready (transition to warmup) or when detecting (run interval)
+  useEffect(() => {
+    if (status !== 'ready' && status !== 'detecting') return;
+    if (!videoRef.current) return;
+    if (matchedEmployee) return; // Already matched
+
+    // When ready, show warmup message and transition to warmup (warmup effect will run one detection then set detecting)
+    if (status === 'ready') {
+      setStatus('warmup');
+      setMessage('Preparing face detection...');
+      return;
     }
 
     // Don't create a new interval if one already exists
