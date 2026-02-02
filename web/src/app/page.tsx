@@ -1,23 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import BusinessLogin from '@/components/BusinessLogin';
 import BusinessSignUp from '@/components/BusinessSignUp';
 import ForgotBusinessID from '@/components/ForgotBusinessID';
 import EmployeeHome from '@/components/EmployeeHome';
 import { Business } from '@/lib/supabase';
-import { preloadAndWarmup } from '@/lib/faceDetection';
 
 type View = 'login' | 'signup' | 'forgot-id' | 'employee-home';
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<View>('login');
   const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
-
-  // Preload face detection models AND warmup in background when app starts
-  useEffect(() => {
-    preloadAndWarmup();
-  }, []);
 
   const handleLoginSuccess = (business: Business) => {
     setCurrentBusiness(business);

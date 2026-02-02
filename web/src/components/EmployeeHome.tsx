@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Business } from '@/lib/supabase';
-import { preloadFaceModels, areModelsLoaded } from '@/lib/faceDetection';
+import { areModelsLoaded, preloadAndWarmupWithProgress } from '@/lib/faceDetection';
 import ClockInOut from './ClockInOut';
 import SignUpEmployee from './SignUpEmployee';
 
@@ -16,20 +16,20 @@ type View = 'home' | 'clock' | 'signup';
 export default function EmployeeHome({ business, onLogout }: Props) {
   const [currentView, setCurrentView] = useState<View>('home');
   const [modelsReady, setModelsReady] = useState(areModelsLoaded());
+  const [loadProgress, setLoadProgress] = useState<number | null>(areModelsLoaded() ? 100 : 0);
 
-  // Preload face models as soon as user reaches employee home
+  // Preload face detection library with progress (business page)
   useEffect(() => {
-    preloadFaceModels();
-    
-    // Check if models are loaded periodically
-    const checkModels = setInterval(() => {
-      if (areModelsLoaded()) {
-        setModelsReady(true);
-        clearInterval(checkModels);
-      }
-    }, 500);
-
-    return () => clearInterval(checkModels);
+    if (areModelsLoaded()) {
+      setModelsReady(true);
+      setLoadProgress(100);
+      return;
+    }
+    setLoadProgress(0);
+    preloadAndWarmupWithProgress((percent) => {
+      setLoadProgress(percent);
+      if (percent === 100) setModelsReady(true);
+    }).catch(() => setLoadProgress(null));
   }, []);
 
   if (currentView === 'clock') {
@@ -92,19 +92,27 @@ export default function EmployeeHome({ business, onLogout }: Props) {
         </button>
       </div>
 
-      {/* Footer */}
-      <div className="py-6 text-center">
-        <div className="flex items-center justify-center gap-2 text-white/50 text-sm">
+      {/* Footer - library loading progress */}
+      <div className="py-6 px-4">
+        <div className="max-w-md mx-auto">
           {modelsReady ? (
-            <>
+            <div className="flex items-center justify-center gap-2 text-white/50 text-sm">
               <div className="w-2 h-2 bg-green-400 rounded-full" />
               <span>Camera Ready</span>
-            </>
+            </div>
           ) : (
-            <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <span>Loading camera...</span>
-            </>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-white/50 text-sm">
+                <span>Loading face detection...</span>
+                <span>{loadProgress ?? 0}%</span>
+              </div>
+              <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-white/60 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${loadProgress ?? 0}%` }}
+                />
+              </div>
+            </div>
           )}
         </div>
       </div>

@@ -65,6 +65,47 @@ export async function loadFaceModels(): Promise<void> {
   return modelsLoading;
 }
 
+// Load models sequentially and report progress (0–70%)
+export async function loadFaceModelsWithProgress(onProgress?: (percent: number) => void): Promise<void> {
+  if (modelsLoaded) {
+    onProgress?.(70);
+    return;
+  }
+  if (modelsLoading) {
+    await modelsLoading;
+    onProgress?.(70);
+    return;
+  }
+
+  const MODEL_URL = '/models';
+  const steps = [
+    () => faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+    () => faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+    () => faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+  ];
+  const progressPerStep = 70 / steps.length;
+
+  modelsLoading = (async () => {
+    try {
+      console.log('⏳ Loading face detection models...');
+      const startTime = Date.now();
+      for (let i = 0; i < steps.length; i++) {
+        await steps[i]();
+        onProgress?.(Math.round((i + 1) * progressPerStep));
+      }
+      modelsLoaded = true;
+      const loadTime = Date.now() - startTime;
+      console.log(`✅ Face detection models loaded in ${loadTime}ms`);
+    } catch (error) {
+      console.error('❌ Failed to load face models:', error);
+      modelsLoading = null;
+      throw error;
+    }
+  })();
+
+  return modelsLoading;
+}
+
 // Preload models in the background (call this early)
 export function preloadFaceModels(): void {
   if (typeof window === 'undefined') return; // Server-side check
@@ -131,6 +172,17 @@ export async function preloadAndWarmup(): Promise<void> {
 
   await loadFaceModels();
   await runWarmup();
+}
+
+// Preload and warm up with progress callback (0–100%)
+export async function preloadAndWarmupWithProgress(onProgress: (percent: number) => void): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  onProgress(0);
+  await loadFaceModelsWithProgress((p) => onProgress(p));
+  onProgress(75);
+  await runWarmup();
+  onProgress(100);
 }
 
 export interface FaceDetectionResult {
@@ -473,14 +525,5 @@ export function descriptorToObject(descriptor: Float32Array): Record<string, num
   return obj;
 }
 
-// Auto-preload models AND warmup when this module is imported on the client
-// This starts loading immediately when any page imports faceDetection
-if (typeof window !== 'undefined') {
-  // Start immediately - don't wait for idle
-  // Use Promise to avoid blocking the import
-  Promise.resolve().then(() => {
-    preloadAndWarmup().catch(err => {
-      console.warn('Background preload/warmup failed:', err);
-    });
-  });
-}
+// Face detection loads only when explicitly requested (e.g. on the business/employee portal page).
+// No auto-preload here so the default/landing page does not load TensorFlow.
