@@ -19,6 +19,8 @@ import {
   ConsecutiveMatchTracker,
   REQUIRED_CONSECUTIVE_MATCHES,
   MIN_LIVENESS_SCORE,
+  isWarmupComplete,
+  preloadAndWarmup,
 } from '@/lib/faceDetection';
 
 type View = 'auth' | 'dashboard';
@@ -125,30 +127,30 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
         if (!mounted) return;
         setLoadingProgress(30);
         
-        // Load face models
+        // Load face models (may already be preloaded)
         setMessage('Loading face detection models...');
-        await loadFaceModels();
-        if (!mounted) return;
-        setLoadingProgress(70);
-        
-        // Load employees
+        const modelsPromise = loadFaceModels();
+
+        // Load employees in parallel
         setMessage('Loading employee data...');
-        const emps = await getAllEmployees();
+        const employeesPromise = getAllEmployees();
+
+        // Wait for models and employees in parallel
+        const [, emps] = await Promise.all([modelsPromise, employeesPromise]);
         if (!mounted) return;
         setEmployees(emps);
-        setLoadingProgress(90);
-        
+        setLoadingProgress(70);
+
         if (emps.length === 0) {
           setStatus('error');
           setMessage('No employees registered in the system.');
           return;
         }
-        
-        // Warm up face detection (first run is slow - do it during loading)
-        setMessage('Warming up face detection...');
-        if (videoRef.current) {
-          await new Promise(r => setTimeout(r, 100)); // Let video paint a frame
-          await detectFace(videoRef.current);
+
+        // Warm up if not already done during preload
+        if (!isWarmupComplete()) {
+          setMessage('Warming up face detection...');
+          await preloadAndWarmup();
         }
         if (!mounted) return;
         setLoadingProgress(100);

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Business, getBusinessByCode } from '@/lib/supabase';
-import { preloadFaceModels } from '@/lib/faceDetection';
+import { preloadAndWarmup } from '@/lib/faceDetection';
 import EmployeeHome from '@/components/EmployeeHome';
 
 export default function BusinessPage() {
@@ -16,8 +16,8 @@ export default function BusinessPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    // Preload face models
-    preloadFaceModels();
+    // Preload face models AND warmup
+    preloadAndWarmup();
 
     const loadBusiness = async () => {
       if (!businessId) {

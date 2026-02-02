@@ -4,6 +4,8 @@ import * as faceapi from 'face-api.js';
 
 let modelsLoaded = false;
 let modelsLoading: Promise<void> | null = null;
+let warmupComplete = false;
+let warmupRunning: Promise<void> | null = null;
 
 // Match threshold - lower = stricter matching (less false positives)
 // Increased to 0.55 for easier detection of existing faces
@@ -67,11 +69,68 @@ export async function loadFaceModels(): Promise<void> {
 export function preloadFaceModels(): void {
   if (typeof window === 'undefined') return; // Server-side check
   if (modelsLoaded || modelsLoading) return;
-  
+
   // Start loading in background without blocking
   loadFaceModels().catch(err => {
     console.warn('Background model preload failed:', err);
   });
+}
+
+// Check if warmup is complete
+export function isWarmupComplete(): boolean {
+  return warmupComplete;
+}
+
+// Warm up TensorFlow.js by running a dummy detection
+// This compiles WebGL shaders so first real detection is fast
+async function runWarmup(): Promise<void> {
+  if (warmupComplete) return;
+  if (warmupRunning) return warmupRunning;
+
+  warmupRunning = (async () => {
+    try {
+      console.log('⏳ Warming up face detection...');
+      const startTime = Date.now();
+
+      // Create a small canvas with dummy image data
+      const canvas = document.createElement('canvas');
+      canvas.width = 160;
+      canvas.height = 120;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Draw a simple gradient to give TensorFlow something to process
+        const gradient = ctx.createLinearGradient(0, 0, 160, 120);
+        gradient.addColorStop(0, '#f0e0d0');
+        gradient.addColorStop(1, '#d0c0b0');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 160, 120);
+
+        // Run detection on dummy canvas - this triggers WebGL shader compilation
+        await faceapi.detectSingleFace(canvas, new faceapi.TinyFaceDetectorOptions({
+          inputSize: 160,
+          scoreThreshold: 0.5
+        }));
+      }
+
+      warmupComplete = true;
+      const warmupTime = Date.now() - startTime;
+      console.log(`✅ Face detection warmed up in ${warmupTime}ms`);
+    } catch (error) {
+      console.warn('Warmup failed (non-critical):', error);
+      // Still mark as complete - real detection will work, just slower first time
+      warmupComplete = true;
+    }
+  })();
+
+  return warmupRunning;
+}
+
+// Preload models AND warm up TensorFlow (call this as early as possible)
+export async function preloadAndWarmup(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  await loadFaceModels();
+  await runWarmup();
 }
 
 export interface FaceDetectionResult {
@@ -414,12 +473,14 @@ export function descriptorToObject(descriptor: Float32Array): Record<string, num
   return obj;
 }
 
-// Auto-preload models when this module is imported on the client
+// Auto-preload models AND warmup when this module is imported on the client
 // This starts loading immediately when any page imports faceDetection
 if (typeof window !== 'undefined') {
-  // Use requestIdleCallback for non-blocking preload, fallback to setTimeout
-  const schedulePreload = window.requestIdleCallback || ((cb: () => void) => setTimeout(cb, 1));
-  schedulePreload(() => {
-    preloadFaceModels();
+  // Start immediately - don't wait for idle
+  // Use Promise to avoid blocking the import
+  Promise.resolve().then(() => {
+    preloadAndWarmup().catch(err => {
+      console.warn('Background preload/warmup failed:', err);
+    });
   });
 }

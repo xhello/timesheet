@@ -6,7 +6,7 @@ import BusinessSignUp from '@/components/BusinessSignUp';
 import ForgotBusinessID from '@/components/ForgotBusinessID';
 import EmployeeHome from '@/components/EmployeeHome';
 import { Business } from '@/lib/supabase';
-import { preloadFaceModels } from '@/lib/faceDetection';
+import { preloadAndWarmup } from '@/lib/faceDetection';
 
 type View = 'login' | 'signup' | 'forgot-id' | 'employee-home';
 
@@ -14,9 +14,9 @@ export default function Home() {
   const [currentView, setCurrentView] = useState<View>('login');
   const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
 
-  // Preload face detection models in background when app starts
+  // Preload face detection models AND warmup in background when app starts
   useEffect(() => {
-    preloadFaceModels();
+    preloadAndWarmup();
   }, []);
 
   const handleLoginSuccess = (business: Business) => {

@@ -2,12 +2,12 @@
 
 import { useEffect } from 'react';
 import EmployeePortal from '@/components/EmployeePortal';
-import { preloadFaceModels } from '@/lib/faceDetection';
+import { preloadAndWarmup } from '@/lib/faceDetection';
 
 export default function EmployeePage() {
-  // Preload face detection models immediately
+  // Preload face detection models AND warmup immediately
   useEffect(() => {
-    preloadFaceModels();
+    preloadAndWarmup();
   }, []);
 
   return <EmployeePortal />;

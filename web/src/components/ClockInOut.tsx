@@ -17,6 +17,8 @@ import {
   ConsecutiveMatchTracker,
   REQUIRED_CONSECUTIVE_MATCHES,
   MIN_LIVENESS_SCORE,
+  isWarmupComplete,
+  preloadAndWarmup,
 } from '@/lib/faceDetection';
 
 interface Props {
@@ -114,25 +116,23 @@ export default function ClockInOut({ business, onBack }: Props) {
         const cameraPromise = startCamera();
         setLoadingProgress(30);
         
-        // Load face models
+        // Load face models (may already be preloaded)
         setMessage('Loading face detection models...');
-        await loadFaceModels();
-        setLoadingProgress(70);
-        
-        // Load employees
+        const modelsPromise = loadFaceModels();
+
+        // Load employees in parallel
         setMessage('Loading employee data...');
         const employeesPromise = getEmployeesByBusiness(business.id);
-        
-        // Wait for camera and employees
-        const [, emps] = await Promise.all([cameraPromise, employeesPromise]);
-        setEmployees(emps);
-        setLoadingProgress(90);
 
-        // Warm up face detection (first run is slow - do it during loading so we show progress)
-        setMessage('Warming up face detection...');
-        if (videoRef.current) {
-          await new Promise(r => setTimeout(r, 100)); // Let video paint a frame
-          await detectFace(videoRef.current);
+        // Wait for camera, models, and employees in parallel
+        const [, , emps] = await Promise.all([cameraPromise, modelsPromise, employeesPromise]);
+        setEmployees(emps);
+        setLoadingProgress(70);
+
+        // Warm up if not already done during preload
+        if (!isWarmupComplete()) {
+          setMessage('Warming up face detection...');
+          await preloadAndWarmup();
         }
         setLoadingProgress(100);
 
