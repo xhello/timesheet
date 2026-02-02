@@ -42,6 +42,9 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
   const [confirmCountdown, setConfirmCountdown] = useState(1);
   const [canConfirm, setCanConfirm] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
+  // New face detected, user can adjust then tap Capture (no auto-freeze)
+  const [readyToCapture, setReadyToCapture] = useState(false);
+  const [latestNewFaceDescriptor, setLatestNewFaceDescriptor] = useState<Float32Array | null>(null);
 
   // Form state
   const [firstName, setFirstName] = useState('');
@@ -162,6 +165,8 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
     setConfirmCountdown(1);
     setCanConfirm(false);
     setExistingEmployee(null);
+    setReadyToCapture(false);
+    setLatestNewFaceDescriptor(null);
     setMessage('Position your face in the frame');
     
     // Restart camera
@@ -175,6 +180,47 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
     }
   };
 
+  // User taps Capture after adjusting face (re-check existing, then capture)
+  const handleCaptureNewFace = async () => {
+    if (!videoRef.current || !latestNewFaceDescriptor) return;
+    const result = await detectFace(videoRef.current);
+    if (!result.detected || !result.descriptor || result.livenessScore < MIN_LIVENESS_SCORE) {
+      setMessage('Face lost. Please keep your face in the frame and try again.');
+      return;
+    }
+    const match = findMatchingEmployee(result.descriptor, employees);
+    if (match) {
+      const employee = employees.find(e => e.id === match.employeeId);
+      if (employee) {
+        setExistingEmployee(employee);
+        setStatus('error');
+        setMessage(`Face already registered to ${employee.first_name} ${employee.last_name}`);
+        setReadyToCapture(false);
+        setLatestNewFaceDescriptor(null);
+        if (detectionIntervalRef.current) {
+          clearInterval(detectionIntervalRef.current);
+          detectionIntervalRef.current = null;
+        }
+        return;
+      }
+    }
+    const imageData = captureImageFromVideo();
+    if (imageData) {
+      setCapturedImage(imageData);
+      setCapturedDescriptor(result.descriptor);
+      setStatus('confirming');
+      setMessage('Is this you? Please confirm.');
+      setConfirmCountdown(1);
+      setCanConfirm(false);
+      setReadyToCapture(false);
+      setLatestNewFaceDescriptor(null);
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current);
+        detectionIntervalRef.current = null;
+      }
+    }
+  };
+
   const handleRecapture = async () => {
     // Reset all detection state
     setCapturedDescriptor(null);
@@ -182,6 +228,8 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
     setConfirmCountdown(1);
     setCanConfirm(false);
     setExistingEmployee(null);
+    setReadyToCapture(false);
+    setLatestNewFaceDescriptor(null);
     setMessage('Position your face in the frame');
     
     // Stop current camera if running
@@ -198,7 +246,7 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
     }
   };
 
-  // Start face detection
+  // Start face detection (no auto-freeze: new face stays live until user taps Capture)
   useEffect(() => {
     if (status !== 'capturing' || !videoRef.current) return;
 
@@ -208,7 +256,7 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
       const result = await detectFace(videoRef.current);
 
       if (result.detected && result.descriptor && result.livenessScore >= MIN_LIVENESS_SCORE) {
-        // Check if face already exists
+        // First check if face already exists in this business
         const match = findMatchingEmployee(result.descriptor, employees);
 
         if (match) {
@@ -217,7 +265,8 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
             setExistingEmployee(employee);
             setStatus('error');
             setMessage(`Face already registered to ${employee.first_name} ${employee.last_name}`);
-            
+            setReadyToCapture(false);
+            setLatestNewFaceDescriptor(null);
             if (detectionIntervalRef.current) {
               clearInterval(detectionIntervalRef.current);
             }
@@ -225,23 +274,13 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
           }
         }
 
-        // Face detected and not existing - capture image and go to confirmation
-        const imageData = captureImageFromVideo();
-        if (imageData) {
-          setCapturedImage(imageData);
-          setCapturedDescriptor(result.descriptor);
-          setStatus('confirming');
-          setMessage('Is this you? Please confirm.');
-          setConfirmCountdown(1);
-          setCanConfirm(false);
-          
-          if (detectionIntervalRef.current) {
-            clearInterval(detectionIntervalRef.current);
-            detectionIntervalRef.current = null;
-          }
-        }
+        // New face: don't freeze — keep live, allow user to adjust, then they tap Capture
+        setLatestNewFaceDescriptor(result.descriptor);
+        setReadyToCapture(true);
+        setMessage('Face detected! Adjust if needed, then tap Capture.');
       } else {
         setMessage(result.message);
+        setReadyToCapture(false);
       }
     }, 500);
 
@@ -610,6 +649,35 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
               >
                 <span>🔄</span>
                 <span>Try Again with Different Face</span>
+              </button>
+            </div>
+          ) : readyToCapture ? (
+            <div className="space-y-6">
+              {/* New face detected — adjust then Capture */}
+              <div className="bg-green-500/20 border border-green-500/40 rounded-2xl p-6 text-center">
+                <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">✓</span>
+                </div>
+                <p className="text-white font-bold text-lg mb-2">New face detected</p>
+                <p className="text-white/80 text-sm">
+                  Adjust your position if needed. When ready, tap Capture to add this user.
+                </p>
+              </div>
+
+              {/* Capture button */}
+              <button
+                onClick={handleCaptureNewFace}
+                className="w-full py-5 bg-green-500 hover:bg-green-600 text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
+              >
+                <span className="text-2xl">📷</span>
+                <span>Capture &amp; Continue</span>
+              </button>
+
+              <button
+                onClick={onBack}
+                className="w-full py-3 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl transition-colors"
+              >
+                Cancel
               </button>
             </div>
           ) : (

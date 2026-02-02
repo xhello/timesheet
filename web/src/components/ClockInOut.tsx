@@ -33,6 +33,7 @@ const MAX_DISTANCE_MILES = MAX_DISTANCE_METERS / 1609.34; // Convert to miles fo
 
 export default function ClockInOut({ business, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const employeesRef = useRef<Employee[]>([]);
@@ -46,6 +47,7 @@ export default function ClockInOut({ business, onBack }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [matchStreak, setMatchStreak] = useState(0);
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [frozenFrameUrl, setFrozenFrameUrl] = useState<string | null>(null);
   
   // Location state
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -120,7 +122,7 @@ export default function ClockInOut({ business, onBack }: Props) {
         setMessage('Loading face detection models...');
         const modelsPromise = loadFaceModels();
 
-        // Load employees in parallel
+        // Load employees for this business only (filter by business_id for face matching)
         setMessage('Loading employee data...');
         const employeesPromise = getEmployeesByBusiness(business.id);
 
@@ -179,16 +181,35 @@ export default function ClockInOut({ business, onBack }: Props) {
     }
   };
 
+  const captureAndFreezeFrame = (): string | null => {
+    if (!videoRef.current || !canvasRef.current) return null;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    return canvas.toDataURL('image/jpeg', 0.9);
+  };
+
   const handleRecapture = async () => {
-    // Reset matched employee state
     setMatchedEmployee(null);
     setHasActiveEntry(false);
     setMatchStreak(0);
+    setFrozenFrameUrl(null);
     matchTrackerRef.current.reset();
     setMessage('Position your face in the frame');
-    
-    // Restart detection
-    setStatus('ready');
+    try {
+      await startCamera();
+      setStatus('ready');
+    } catch (error) {
+      console.error('Failed to restart camera:', error);
+      setStatus('error');
+      setMessage('Failed to restart camera. Please refresh.');
+    }
   };
 
   // Start face detection when ready (transition to detecting) or when detecting (run interval)
@@ -232,6 +253,18 @@ export default function ClockInOut({ business, onBack }: Props) {
             // Confirmed match after multiple consecutive detections
             const employee = currentEmployees.find(e => e.id === match.employeeId);
             if (employee) {
+              // Freeze camera: capture current frame then stop stream
+              const frameUrl = captureAndFreezeFrame();
+              if (frameUrl) setFrozenFrameUrl(frameUrl);
+              if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+                streamRef.current = null;
+              }
+              if (detectionIntervalRef.current) {
+                clearInterval(detectionIntervalRef.current);
+                detectionIntervalRef.current = null;
+              }
+
               setMatchedEmployee(employee);
               setStatus('verified');
               setMessage(`Welcome, ${employee.first_name}!`);
@@ -239,12 +272,6 @@ export default function ClockInOut({ business, onBack }: Props) {
               // Check if they have an active time entry
               const activeEntry = await getActiveTimeEntry(employee.id);
               setHasActiveEntry(!!activeEntry);
-
-              // Stop detection
-              if (detectionIntervalRef.current) {
-                clearInterval(detectionIntervalRef.current);
-                detectionIntervalRef.current = null;
-              }
             }
           } else {
             // Show progress towards confirmation
@@ -382,13 +409,22 @@ export default function ClockInOut({ business, onBack }: Props) {
           )}
 
           <div className="relative w-full max-w-lg aspect-[3/4] bg-black rounded-2xl overflow-hidden">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover transform scale-x-[-1]"
-            />
+            {status === 'verified' && frozenFrameUrl ? (
+              <img
+                src={frozenFrameUrl}
+                alt="Captured face"
+                className="w-full h-full object-cover transform scale-x-[-1]"
+              />
+            ) : (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover transform scale-x-[-1]"
+              />
+            )}
+            <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
 
             {/* Face Guide Overlay */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

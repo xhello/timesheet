@@ -6,7 +6,8 @@ import {
   TimeEntry,
   TimeChangeRequest,
   Business,
-  getAllEmployees,
+  getBusinessByCode,
+  getEmployeesByBusiness,
   getTimeEntriesByEmployee,
   getBusinessById,
   createTimeChangeRequest,
@@ -23,11 +24,11 @@ import {
   preloadAndWarmup,
 } from '@/lib/faceDetection';
 
-type View = 'auth' | 'dashboard';
+type View = 'business-id' | 'auth' | 'dashboard';
 type AuthStatus = 'loading' | 'ready' | 'detecting' | 'verified' | 'error';
 
 export default function EmployeePortal() {
-  const [view, setView] = useState<View>('auth');
+  const [view, setView] = useState<View>('business-id');
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [business, setBusiness] = useState<Business | null>(null);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
@@ -64,11 +65,31 @@ export default function EmployeePortal() {
     setBusiness(null);
     setTimeEntries([]);
     setChangeRequests([]);
-    setView('auth');
+    setView('business-id');
   };
 
-  if (view === 'auth') {
-    return <FaceAuth onSuccess={handleAuthSuccess} />;
+  if (view === 'business-id') {
+    return (
+      <BusinessIdStep
+        onContinue={(biz) => {
+          setBusiness(biz);
+          setView('auth');
+        }}
+      />
+    );
+  }
+
+  if (view === 'auth' && business) {
+    return (
+      <FaceAuth
+        business={business}
+        onSuccess={handleAuthSuccess}
+        onBack={() => {
+          setBusiness(null);
+          setView('business-id');
+        }}
+      />
+    );
   }
 
   return (
@@ -83,8 +104,97 @@ export default function EmployeePortal() {
   );
 }
 
-// Face Authentication Component
-function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
+// Business ID step: ask for business ID, then "Check my hours" → face auth
+function BusinessIdStep({ onContinue }: { onContinue: (business: Business) => void }) {
+  const [businessId, setBusinessId] = useState('');
+  const [error, setError] = useState('');
+  const [isChecking, setIsChecking] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = businessId.trim().toUpperCase();
+    if (!code) {
+      setError('Please enter your business ID');
+      return;
+    }
+    setError('');
+    setIsChecking(true);
+    try {
+      const biz = await getBusinessByCode(code);
+      if (biz) {
+        onContinue(biz);
+      } else {
+        setError('Business not found. Please check your business ID.');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Something went wrong. Please try again.');
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-indigo-900 to-purple-900 flex flex-col">
+      <div className="flex-1 flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-sm">
+          <h1 className="text-2xl font-bold text-white text-center mb-2">Employee Portal</h1>
+          <p className="text-white/70 text-center text-sm mb-8">
+            Enter your business ID to check your hours
+          </p>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="business-id" className="block text-sm font-medium text-white/90 mb-2">
+                Business ID
+              </label>
+              <input
+                id="business-id"
+                type="text"
+                value={businessId}
+                onChange={(e) => {
+                  setBusinessId(e.target.value.toUpperCase());
+                  setError('');
+                }}
+                placeholder="e.g. 123456"
+                className="w-full px-4 py-3 rounded-xl border border-white/20 bg-white/10 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                autoComplete="off"
+                disabled={isChecking}
+              />
+            </div>
+            {error && (
+              <p className="text-red-300 text-sm">{error}</p>
+            )}
+            <button
+              type="submit"
+              disabled={isChecking}
+              className="w-full py-4 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              {isChecking ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Checking...</span>
+                </>
+              ) : (
+                <span>Check my hours</span>
+              )}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Face Authentication Component (runs after business ID is entered)
+function FaceAuth({
+  business,
+  onSuccess,
+  onBack,
+}: {
+  business: Business;
+  onSuccess: (employee: Employee) => void;
+  onBack: () => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -101,7 +211,7 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
     employeesRef.current = employees;
   }, [employees]);
 
-  // Initialize
+  // Initialize (load employees for this business only)
   useEffect(() => {
     let mounted = true;
     
@@ -131,9 +241,9 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
         setMessage('Loading face detection models...');
         const modelsPromise = loadFaceModels();
 
-        // Load employees in parallel
+        // Load employees for this business only (filter by business_id for face matching)
         setMessage('Loading employee data...');
-        const employeesPromise = getAllEmployees();
+        const employeesPromise = getEmployeesByBusiness(business.id);
 
         // Wait for models and employees in parallel
         const [, emps] = await Promise.all([modelsPromise, employeesPromise]);
@@ -143,7 +253,7 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
 
         if (emps.length === 0) {
           setStatus('error');
-          setMessage('No employees registered in the system.');
+          setMessage('No employees registered for this business.');
           return;
         }
 
@@ -178,7 +288,7 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
         streamRef.current = null;
       }
     };
-  }, []);
+  }, [business.id]);
 
   // Transition from ready to detecting (warmup already done during loading)
   useEffect(() => {
@@ -258,9 +368,18 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-900 to-purple-900 flex flex-col">
       {/* Header */}
-      <div className="px-4 py-6 text-center">
-        <h1 className="text-3xl font-bold text-white mb-2">Employee Portal</h1>
-        <p className="text-white/70">Authenticate with your face to access your timesheet</p>
+      <div className="px-4 py-6 flex items-center justify-between">
+        <button
+          onClick={onBack}
+          className="text-white/70 hover:text-white transition-colors"
+        >
+          ← Change business
+        </button>
+        <div className="text-center flex-1">
+          <h1 className="text-2xl font-bold text-white">Face authentication</h1>
+          <p className="text-white/60 text-sm">{business.name}</p>
+        </div>
+        <div className="w-24" />
       </div>
 
       {/* Camera View */}
