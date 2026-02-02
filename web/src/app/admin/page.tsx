@@ -150,7 +150,7 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
   const [allRequests, setAllRequests] = useState<TimeChangeRequest[]>([]);
   const [employees, setEmployees] = useState<Map<string, Employee>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'hours'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'hours' | 'reports'>('pending');
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   // Employee hours state
@@ -166,6 +166,19 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
   });
   const [loadingHours, setLoadingHours] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeWithHours | null>(null);
+
+  // Report state
+  const [reportStartDate, setReportStartDate] = useState(() => {
+    const date = new Date();
+    date.setDate(1);
+    return date.toISOString().split('T')[0];
+  });
+  const [reportEndDate, setReportEndDate] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+  const [reportData, setReportData] = useState<EmployeeWithHours[]>([]);
+  const [reportGenerated, setReportGenerated] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
 
   const loadRequests = async () => {
     try {
@@ -229,6 +242,79 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     } finally {
       setLoadingHours(false);
     }
+  };
+
+  const generateReport = async () => {
+    setGeneratingReport(true);
+    setReportGenerated(false);
+    try {
+      const emps = await getEmployeesByBusiness(business.id);
+      const empsWithHours: EmployeeWithHours[] = [];
+
+      for (const emp of emps) {
+        const entries = await getTimeEntriesByEmployee(emp.id, 1000);
+        
+        // Filter by date range
+        const filteredEntries = entries.filter(entry => {
+          const entryDate = new Date(entry.clock_in_time).toISOString().split('T')[0];
+          return entryDate >= reportStartDate && entryDate <= reportEndDate;
+        });
+
+        // Calculate total hours
+        let totalMs = 0;
+        for (const entry of filteredEntries) {
+          if (entry.clock_out_time) {
+            totalMs += new Date(entry.clock_out_time).getTime() - new Date(entry.clock_in_time).getTime();
+          }
+        }
+
+        empsWithHours.push({
+          ...emp,
+          timeEntries: filteredEntries,
+          totalHours: totalMs / (1000 * 60 * 60),
+        });
+      }
+
+      // Sort by total hours descending
+      empsWithHours.sort((a, b) => b.totalHours - a.totalHours);
+      setReportData(empsWithHours);
+      setReportGenerated(true);
+    } catch (error) {
+      console.error('Failed to generate report:', error);
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const downloadCSV = () => {
+    if (reportData.length === 0) return;
+
+    const headers = ['Employee Name', 'Email', 'Phone', 'Total Hours', 'Total Entries'];
+    const rows = reportData.map(emp => [
+      emp.full_name,
+      emp.email || '',
+      emp.phone || '',
+      emp.totalHours.toFixed(2),
+      emp.timeEntries.length.toString(),
+    ]);
+
+    const csvContent = [
+      `TimeSheet Report - ${business.name}`,
+      `Date Range: ${reportStartDate} to ${reportEndDate}`,
+      `Generated: ${new Date().toLocaleString()}`,
+      '',
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
+      '',
+      `Total Employees: ${reportData.length}`,
+      `Total Hours: ${reportData.reduce((acc, emp) => acc + emp.totalHours, 0).toFixed(2)}`,
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `timesheet-report-${reportStartDate}-to-${reportEndDate}.csv`;
+    link.click();
   };
 
   useEffect(() => {
@@ -381,10 +467,20 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
             >
               Employee Hours
             </button>
+            <button
+              onClick={() => setActiveTab('reports')}
+              className={`flex-1 py-4 text-center font-medium transition-colors ${
+                activeTab === 'reports'
+                  ? 'text-indigo-600 border-b-2 border-indigo-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              📊 Reports
+            </button>
           </div>
 
           {/* Requests List */}
-          {activeTab !== 'hours' && (
+          {(activeTab === 'pending' || activeTab === 'all') && (
             isLoading ? (
               <div className="py-12 text-center">
                 <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mx-auto" />
@@ -599,6 +695,178 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Reports Tab */}
+          {activeTab === 'reports' && (
+            <div className="p-6">
+              {/* Report Configuration */}
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Generate Hours Report</h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      From Date
+                    </label>
+                    <input
+                      type="date"
+                      value={reportStartDate}
+                      onChange={(e) => {
+                        setReportStartDate(e.target.value);
+                        setReportGenerated(false);
+                      }}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      To Date
+                    </label>
+                    <input
+                      type="date"
+                      value={reportEndDate}
+                      onChange={(e) => {
+                        setReportEndDate(e.target.value);
+                        setReportGenerated(false);
+                      }}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button
+                      onClick={generateReport}
+                      disabled={generatingReport}
+                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+                    >
+                      {generatingReport ? (
+                        <>
+                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Generating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>📊</span>
+                          <span>Generate Report</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Report Results */}
+              {reportGenerated && (
+                <div>
+                  {/* Report Header */}
+                  <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-6 mb-6 text-white">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h2 className="text-2xl font-bold">{business.name}</h2>
+                        <p className="text-white/80">Hours Report</p>
+                      </div>
+                      <button
+                        onClick={downloadCSV}
+                        className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors flex items-center gap-2"
+                      >
+                        <span>📥</span>
+                        <span>Download CSV</span>
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                      <div className="bg-white/10 rounded-lg p-3">
+                        <p className="text-3xl font-bold">{reportData.length}</p>
+                        <p className="text-sm text-white/80">Employees</p>
+                      </div>
+                      <div className="bg-white/10 rounded-lg p-3">
+                        <p className="text-3xl font-bold">
+                          {reportData.reduce((acc, emp) => acc + emp.totalHours, 0).toFixed(1)}
+                        </p>
+                        <p className="text-sm text-white/80">Total Hours</p>
+                      </div>
+                      <div className="bg-white/10 rounded-lg p-3">
+                        <p className="text-3xl font-bold">
+                          {reportData.reduce((acc, emp) => acc + emp.timeEntries.length, 0)}
+                        </p>
+                        <p className="text-sm text-white/80">Total Entries</p>
+                      </div>
+                    </div>
+                    <p className="text-sm text-white/60 mt-4 text-center">
+                      {reportStartDate} → {reportEndDate}
+                    </p>
+                  </div>
+
+                  {/* Employee Table */}
+                  {reportData.length === 0 ? (
+                    <div className="py-12 text-center text-gray-500">
+                      <p className="text-4xl mb-2">📭</p>
+                      <p>No time entries found for this date range</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-200">
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">#</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Employee</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Contact</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Entries</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Hours</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {reportData.map((emp, index) => (
+                            <tr key={emp.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-4 text-sm text-gray-500">{index + 1}</td>
+                              <td className="px-4 py-4">
+                                <p className="font-medium text-gray-900">{emp.full_name}</p>
+                              </td>
+                              <td className="px-4 py-4">
+                                <p className="text-sm text-gray-600">{emp.email || '-'}</p>
+                                <p className="text-xs text-gray-400">{emp.phone || '-'}</p>
+                              </td>
+                              <td className="px-4 py-4 text-right text-sm text-gray-600">
+                                {emp.timeEntries.length}
+                              </td>
+                              <td className="px-4 py-4 text-right">
+                                <span className={`text-lg font-bold ${
+                                  emp.totalHours > 0 ? 'text-indigo-600' : 'text-gray-400'
+                                }`}>
+                                  {emp.totalHours.toFixed(1)}
+                                </span>
+                                <span className="text-xs text-gray-500 ml-1">hrs</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="bg-indigo-50 font-semibold">
+                            <td colSpan={3} className="px-4 py-4 text-indigo-700">
+                              Total ({reportData.length} employees)
+                            </td>
+                            <td className="px-4 py-4 text-right text-indigo-700">
+                              {reportData.reduce((acc, emp) => acc + emp.timeEntries.length, 0)}
+                            </td>
+                            <td className="px-4 py-4 text-right text-indigo-700">
+                              {reportData.reduce((acc, emp) => acc + emp.totalHours, 0).toFixed(1)} hrs
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Instructions when no report */}
+              {!reportGenerated && !generatingReport && (
+                <div className="py-12 text-center text-gray-500">
+                  <p className="text-6xl mb-4">📊</p>
+                  <p className="text-lg font-medium mb-2">Generate a Hours Report</p>
+                  <p>Select a date range and click &quot;Generate Report&quot; to see everyone&apos;s total hours.</p>
                 </div>
               )}
             </div>
