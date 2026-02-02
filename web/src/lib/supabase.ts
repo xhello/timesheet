@@ -13,9 +13,29 @@ export interface Business {
   email: string | null;
   address: string | null;
   timezone: string;
+  latitude: number | null;
+  longitude: number | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// Calculate distance between two coordinates in miles (Haversine formula)
+export function calculateDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 3959; // Earth's radius in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 export interface Employee {
@@ -44,6 +64,10 @@ export interface TimeEntry {
   clock_in_liveness_score: number | null;
   clock_out_liveness_verified: boolean;
   clock_out_liveness_score: number | null;
+  clock_in_latitude: number | null;
+  clock_in_longitude: number | null;
+  clock_out_latitude: number | null;
+  clock_out_longitude: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;

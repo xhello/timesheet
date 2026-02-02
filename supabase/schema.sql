@@ -19,6 +19,8 @@ CREATE TABLE businesses (
     email TEXT,
     address TEXT,
     timezone TEXT DEFAULT 'UTC',
+    latitude DOUBLE PRECISION,           -- Business location for geo-fencing
+    longitude DOUBLE PRECISION,          -- Business location for geo-fencing
     settings JSONB DEFAULT '{}',
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),

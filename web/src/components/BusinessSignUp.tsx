@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createBusiness, generateBusinessCode, getBusinessByCode } from '@/lib/supabase';
 
 interface Props {
@@ -16,6 +16,36 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
   const [showSuccess, setShowSuccess] = useState(false);
   const [generatedCode, setGeneratedCode] = useState('');
   const [emailSent, setEmailSent] = useState(false);
+  
+  // Location state
+  const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationError, setLocationError] = useState('');
+  const [locationLoading, setLocationLoading] = useState(true);
+
+  // Get location on mount
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by your browser');
+      setLocationLoading(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        setLocationLoading(false);
+      },
+      (err) => {
+        console.error('Location error:', err);
+        setLocationError('Unable to get location. Please enable location services.');
+        setLocationLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, []);
 
   const isValidEmail = (email: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -23,6 +53,10 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
 
   const handleRegister = async () => {
     if (!businessName.trim() || !email.trim() || !isValidEmail(email)) return;
+    if (!location) {
+      setError('Location is required. Please enable location services and refresh.');
+      return;
+    }
 
     setIsLoading(true);
     setError('');
@@ -40,11 +74,13 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
 
       setGeneratedCode(code);
 
-      // Create business in Supabase
+      // Create business in Supabase with location
       await createBusiness({
         business_code: code,
         name: businessName.trim(),
         email: email.toLowerCase().trim(),
+        latitude: location.latitude,
+        longitude: location.longitude,
       });
 
       // Send email with business code
@@ -154,6 +190,42 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
           />
         </div>
 
+        {/* Location Status */}
+        <div className={`rounded-xl p-4 ${
+          locationLoading 
+            ? 'bg-blue-50 border border-blue-200' 
+            : location 
+              ? 'bg-green-50 border border-green-200' 
+              : 'bg-red-50 border border-red-200'
+        }`}>
+          <div className="flex items-center gap-3">
+            {locationLoading ? (
+              <>
+                <div className="w-5 h-5 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                <p className="text-blue-700 text-sm">Getting your location...</p>
+              </>
+            ) : location ? (
+              <>
+                <span className="text-xl">📍</span>
+                <div>
+                  <p className="text-green-700 text-sm font-medium">Location captured</p>
+                  <p className="text-green-600 text-xs">
+                    Employees must clock in/out within 1 mile of this location
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="text-xl">⚠️</span>
+                <div>
+                  <p className="text-red-700 text-sm font-medium">Location required</p>
+                  <p className="text-red-600 text-xs">{locationError}</p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
         <p className="text-sm text-gray-500">
           A unique Business ID will be generated and sent to your email address.
         </p>
@@ -166,7 +238,7 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
 
         <button
           onClick={handleRegister}
-          disabled={!businessName.trim() || !email.trim() || !isValidEmail(email) || isLoading}
+          disabled={!businessName.trim() || !email.trim() || !isValidEmail(email) || isLoading || !location}
           className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
         >
           {isLoading ? (

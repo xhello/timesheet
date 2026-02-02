@@ -8,6 +8,7 @@ import {
   getActiveTimeEntry,
   createTimeEntry,
   updateTimeEntry,
+  calculateDistance,
 } from '@/lib/supabase';
 import {
   loadFaceModels,
@@ -25,6 +26,8 @@ interface Props {
 
 type Status = 'loading' | 'ready' | 'detecting' | 'verified' | 'error';
 
+const MAX_DISTANCE_MILES = 1; // Maximum distance allowed for clock in/out
+
 export default function ClockInOut({ business, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -39,11 +42,63 @@ export default function ClockInOut({ business, onBack }: Props) {
   const [hasActiveEntry, setHasActiveEntry] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [matchStreak, setMatchStreak] = useState(0);
+  
+  // Location state
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationError, setLocationError] = useState('');
+  const [isWithinRange, setIsWithinRange] = useState(false);
+  const [distanceFromBusiness, setDistanceFromBusiness] = useState<number | null>(null);
 
   // Keep ref in sync with state
   useEffect(() => {
     employeesRef.current = employees;
   }, [employees]);
+
+  // Get user location and check if within range
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation not supported');
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const userLat = position.coords.latitude;
+        const userLon = position.coords.longitude;
+        setUserLocation({ latitude: userLat, longitude: userLon });
+
+        // Check distance from business
+        if (business.latitude && business.longitude) {
+          const distance = calculateDistance(
+            userLat,
+            userLon,
+            business.latitude,
+            business.longitude
+          );
+          setDistanceFromBusiness(distance);
+          setIsWithinRange(distance <= MAX_DISTANCE_MILES);
+          
+          if (distance > MAX_DISTANCE_MILES) {
+            setLocationError(`You are ${distance.toFixed(2)} miles away. Must be within ${MAX_DISTANCE_MILES} mile.`);
+          } else {
+            setLocationError('');
+          }
+        } else {
+          // Business has no location set - allow clock in/out
+          setIsWithinRange(true);
+          setLocationError('');
+        }
+      },
+      (err) => {
+        console.error('Location error:', err);
+        setLocationError('Unable to get location. Please enable location services.');
+        setIsWithinRange(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [business.latitude, business.longitude]);
 
   // Load employees and face models
   useEffect(() => {
@@ -197,6 +252,11 @@ export default function ClockInOut({ business, onBack }: Props) {
 
   const handleClockIn = async () => {
     if (!matchedEmployee || isProcessing) return;
+    
+    if (!isWithinRange) {
+      setMessage('You must be within 1 mile of the business to clock in.');
+      return;
+    }
 
     setIsProcessing(true);
     try {
@@ -207,6 +267,8 @@ export default function ClockInOut({ business, onBack }: Props) {
         status: 'active',
         clock_in_liveness_verified: true,
         clock_in_liveness_score: 0.9,
+        clock_in_latitude: userLocation?.latitude,
+        clock_in_longitude: userLocation?.longitude,
       });
 
       setMessage('Clocked in successfully!');
@@ -221,6 +283,11 @@ export default function ClockInOut({ business, onBack }: Props) {
 
   const handleClockOut = async () => {
     if (!matchedEmployee || isProcessing) return;
+    
+    if (!isWithinRange) {
+      setMessage('You must be within 1 mile of the business to clock out.');
+      return;
+    }
 
     setIsProcessing(true);
     try {
@@ -232,6 +299,8 @@ export default function ClockInOut({ business, onBack }: Props) {
           status: 'completed',
           clock_out_liveness_verified: true,
           clock_out_liveness_score: 0.9,
+          clock_out_latitude: userLocation?.latitude,
+          clock_out_longitude: userLocation?.longitude,
         });
 
         setMessage('Clocked out successfully!');
@@ -326,6 +395,36 @@ export default function ClockInOut({ business, onBack }: Props) {
                 <p className="text-white/60">{matchedEmployee.email}</p>
               </div>
 
+              {/* Location Status */}
+              <div className={`rounded-xl p-4 ${
+                isWithinRange 
+                  ? 'bg-green-500/20 border border-green-500/30' 
+                  : 'bg-red-500/20 border border-red-500/30'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{isWithinRange ? '📍' : '⚠️'}</span>
+                  <div>
+                    {isWithinRange ? (
+                      <>
+                        <p className="text-green-400 font-medium">Location verified</p>
+                        {distanceFromBusiness !== null && (
+                          <p className="text-green-400/70 text-sm">
+                            {distanceFromBusiness < 0.1 
+                              ? 'You are at the business location' 
+                              : `${distanceFromBusiness.toFixed(2)} miles away`}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-red-400 font-medium">Out of range</p>
+                        <p className="text-red-400/70 text-sm">{locationError}</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {/* Re-capture Button */}
               <button
                 onClick={handleRecapture}
@@ -339,30 +438,30 @@ export default function ClockInOut({ business, onBack }: Props) {
               {hasActiveEntry ? (
                 <button
                   onClick={handleClockOut}
-                  disabled={isProcessing}
-                  className="w-full py-5 bg-red-500 hover:bg-red-600 disabled:bg-gray-600 text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
+                  disabled={isProcessing || !isWithinRange}
+                  className="w-full py-5 bg-red-500 hover:bg-red-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
                 >
                   {isProcessing ? (
                     <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
                     <>
                       <span className="text-2xl">🕐</span>
-                      <span>Clock Out</span>
+                      <span>{isWithinRange ? 'Clock Out' : 'Out of Range'}</span>
                     </>
                   )}
                 </button>
               ) : (
                 <button
                   onClick={handleClockIn}
-                  disabled={isProcessing}
-                  className="w-full py-5 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
+                  disabled={isProcessing || !isWithinRange}
+                  className="w-full py-5 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
                 >
                   {isProcessing ? (
                     <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
                     <>
                       <span className="text-2xl">⏱️</span>
-                      <span>Clock In</span>
+                      <span>{isWithinRange ? 'Clock In' : 'Out of Range'}</span>
                     </>
                   )}
                 </button>
