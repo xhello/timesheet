@@ -16,6 +16,8 @@ import {
   getRecentTimeEntriesByBusiness,
   approveTimeChangeRequest,
   declineTimeChangeRequest,
+  createTimeEntry,
+  createTimeChangeRequest,
 } from '@/lib/supabase';
 
 type View = 'login' | 'dashboard';
@@ -193,6 +195,16 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [lastSeenTime, setLastSeenTime] = useState<string | null>(null);
+
+  // Admin Add Hours modal state
+  const [showAddHoursModal, setShowAddHoursModal] = useState(false);
+  const [addHoursEmployeeId, setAddHoursEmployeeId] = useState('');
+  const [addHoursClockIn, setAddHoursClockIn] = useState('');
+  const [addHoursClockOut, setAddHoursClockOut] = useState('');
+  const [addHoursNote, setAddHoursNote] = useState('');
+  const [addHoursSubmitting, setAddHoursSubmitting] = useState(false);
+  const [addHoursSuccess, setAddHoursSuccess] = useState(false);
+  const [employeesList, setEmployeesList] = useState<Employee[]>([]);
 
   const loadRequests = async () => {
     try {
@@ -438,6 +450,89 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     return !request.time_entry_id || !request.original_clock_in;
   };
 
+  // Load all employees for the dropdown
+  const loadEmployeesList = async () => {
+    try {
+      const emps = await getEmployeesByBusiness(business.id);
+      setEmployeesList(emps);
+    } catch (error) {
+      console.error('Failed to load employees:', error);
+    }
+  };
+
+  // Open add hours modal
+  const openAddHoursModal = () => {
+    loadEmployeesList();
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    setAddHoursClockIn(`${dateStr}T09:00`);
+    setAddHoursClockOut(`${dateStr}T17:00`);
+    setAddHoursEmployeeId('');
+    setAddHoursNote('');
+    setAddHoursSuccess(false);
+    setShowAddHoursModal(true);
+  };
+
+  // Close add hours modal
+  const closeAddHoursModal = () => {
+    setShowAddHoursModal(false);
+    setAddHoursEmployeeId('');
+    setAddHoursClockIn('');
+    setAddHoursClockOut('');
+    setAddHoursNote('');
+    setAddHoursSuccess(false);
+  };
+
+  // Submit add hours (admin directly adds)
+  const handleAdminAddHours = async () => {
+    if (!addHoursEmployeeId || !addHoursClockIn || !addHoursClockOut) return;
+
+    setAddHoursSubmitting(true);
+    try {
+      const clockInTime = new Date(addHoursClockIn).toISOString();
+      const clockOutTime = new Date(addHoursClockOut).toISOString();
+
+      // Create the time entry directly
+      await createTimeEntry({
+        employee_id: addHoursEmployeeId,
+        business_id: business.id,
+        clock_in_time: clockInTime,
+        clock_out_time: clockOutTime,
+        status: 'approved',
+        clock_in_liveness_verified: false,
+        clock_out_liveness_verified: false,
+        notes: addHoursNote || 'Added by admin',
+      });
+
+      // Create a notification record for the employee (as approved request)
+      await createTimeChangeRequest({
+        time_entry_id: null,
+        employee_id: addHoursEmployeeId,
+        business_id: business.id,
+        original_clock_in: null,
+        original_clock_out: null,
+        requested_clock_in: clockInTime,
+        requested_clock_out: clockOutTime,
+        reason: `Admin added hours: ${addHoursNote || 'No note provided'}`,
+        status: 'approved',
+        reviewed_at: new Date().toISOString(),
+        request_type: 'add',
+      });
+
+      setAddHoursSuccess(true);
+      await loadRecentActivity();
+
+      setTimeout(() => {
+        closeAddHoursModal();
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to add hours:', error);
+      alert('Failed to add hours. Please try again.');
+    } finally {
+      setAddHoursSubmitting(false);
+    }
+  };
+
   const handleDecline = async (request: TimeChangeRequest) => {
     setProcessingId(request.id);
     try {
@@ -549,6 +644,13 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
               </div>
             </div>
             <div className="flex items-center gap-4">
+              <button
+                onClick={openAddHoursModal}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-2"
+              >
+                <span>➕</span>
+                <span>Add Hours</span>
+              </button>
               <span className="text-slate-400 text-sm">ID: {business.business_code}</span>
               <button
                 onClick={onLogout}
@@ -1050,6 +1152,121 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
           )}
         </div>
       </div>
+
+      {/* Admin Add Hours Modal */}
+      {showAddHoursModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
+            {addHoursSuccess ? (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">✓</span>
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Hours Added!</h3>
+                <p className="text-gray-600">The time entry has been added and the employee has been notified.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-gray-900">Add Hours for Employee</h3>
+                  <button
+                    onClick={closeAddHoursModal}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Employee *</label>
+                    <select
+                      value={addHoursEmployeeId}
+                      onChange={(e) => setAddHoursEmployeeId(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900"
+                    >
+                      <option value="">-- Select Employee --</option>
+                      {employeesList.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.full_name} {emp.email ? `(${emp.email})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Clock In Time *</label>
+                    <input
+                      type="datetime-local"
+                      value={addHoursClockIn}
+                      onChange={(e) => setAddHoursClockIn(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Clock Out Time *</label>
+                    <input
+                      type="datetime-local"
+                      value={addHoursClockOut}
+                      onChange={(e) => setAddHoursClockOut(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900"
+                    />
+                  </div>
+
+                  {addHoursClockIn && addHoursClockOut && (
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500 mb-1">Duration</p>
+                      <p className="text-lg font-bold text-gray-900">
+                        {(() => {
+                          const start = new Date(addHoursClockIn);
+                          const end = new Date(addHoursClockOut);
+                          const diffMs = end.getTime() - start.getTime();
+                          if (diffMs < 0) return 'Invalid time range';
+                          const hours = Math.floor(diffMs / (1000 * 60 * 60));
+                          const minutes = Math.round((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                          return `${hours}h ${minutes}m`;
+                        })()}
+                      </p>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+                    <textarea
+                      value={addHoursNote}
+                      onChange={(e) => setAddHoursNote(e.target.value)}
+                      placeholder="Add a note for this time entry..."
+                      rows={2}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 resize-none text-gray-900"
+                    />
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={closeAddHoursModal}
+                      className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleAdminAddHours}
+                      disabled={!addHoursEmployeeId || !addHoursClockIn || !addHoursClockOut || addHoursSubmitting}
+                      className="flex-1 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+                    >
+                      {addHoursSubmitting ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        'Add Hours'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
