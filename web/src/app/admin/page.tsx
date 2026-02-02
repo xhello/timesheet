@@ -569,9 +569,29 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     <div className="min-h-screen bg-gray-100">
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white">
-        <div className="max-w-6xl mx-auto px-4 py-6">
+        <div className="max-w-6xl mx-auto px-4 py-4">
+          {/* Top Row - Business ID */}
+          <div className="mb-2">
+            <span className="text-sm font-mono bg-white/10 px-3 py-1 rounded-lg">
+              ID: {business.business_code}
+            </span>
+          </div>
+          
+          {/* Main Row */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-2xl font-bold">{business.name}</h1>
+              <p className="text-slate-400">Admin Dashboard</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={openAddHoursModal}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-2"
+              >
+                <span>➕</span>
+                <span>Add Hours</span>
+              </button>
+
               {/* Notification Bell */}
               <div className="relative">
                 <button
@@ -588,7 +608,7 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
 
                 {/* Notification Popup */}
                 {showNotifications && (
-                  <div className="absolute top-full left-0 mt-2 w-80 bg-white rounded-xl shadow-2xl z-50 overflow-hidden">
+                  <div className="absolute top-full right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl z-50 overflow-hidden">
                     <div className="bg-slate-800 px-4 py-3">
                       <h3 className="font-semibold text-white">Recent Activity</h3>
                     </div>
@@ -638,20 +658,6 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                 )}
               </div>
 
-              <div>
-                <h1 className="text-2xl font-bold">{business.name}</h1>
-                <p className="text-slate-400">Admin Dashboard</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={openAddHoursModal}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-2"
-              >
-                <span>➕</span>
-                <span>Add Hours</span>
-              </button>
-              <span className="text-slate-400 text-sm">ID: {business.business_code}</span>
               <button
                 onClick={onLogout}
                 className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
