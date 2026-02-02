@@ -13,6 +13,7 @@ import {
   getEmployeeById,
   getEmployeesByBusiness,
   getTimeEntriesByEmployee,
+  getRecentTimeEntriesByBusiness,
   approveTimeChangeRequest,
   declineTimeChangeRequest,
 } from '@/lib/supabase';
@@ -144,6 +145,14 @@ interface EmployeeWithHours extends Employee {
   totalHours: number;
 }
 
+// Activity item for notifications
+interface ActivityItem {
+  id: string;
+  employeeName: string;
+  action: 'clock_in' | 'clock_out';
+  time: string;
+}
+
 // Admin Dashboard Component
 function AdminDashboard({ business, onLogout }: { business: Business; onLogout: () => void }) {
   const [pendingRequests, setPendingRequests] = useState<TimeChangeRequest[]>([]);
@@ -180,6 +189,11 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
   const [reportGenerated, setReportGenerated] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
 
+  // Notification state
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [lastSeenTime, setLastSeenTime] = useState<string | null>(null);
+
   const loadRequests = async () => {
     try {
       const [pending, all] = await Promise.all([
@@ -203,6 +217,56 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
       setIsLoading(false);
     }
   };
+
+  const loadRecentActivity = async () => {
+    try {
+      const entries = await getRecentTimeEntriesByBusiness(business.id, 30);
+      const emps = await getEmployeesByBusiness(business.id);
+      const empMap = new Map(emps.map(e => [e.id, e.full_name]));
+
+      const activityItems: ActivityItem[] = [];
+      
+      for (const entry of entries) {
+        const empName = empMap.get(entry.employee_id) || 'Unknown';
+        
+        // Add clock in activity
+        activityItems.push({
+          id: `${entry.id}-in`,
+          employeeName: empName,
+          action: 'clock_in',
+          time: entry.clock_in_time,
+        });
+        
+        // Add clock out activity if exists
+        if (entry.clock_out_time) {
+          activityItems.push({
+            id: `${entry.id}-out`,
+            employeeName: empName,
+            action: 'clock_out',
+            time: entry.clock_out_time,
+          });
+        }
+      }
+
+      // Sort by time descending
+      activityItems.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+      setActivities(activityItems.slice(0, 20)); // Keep latest 20
+    } catch (error) {
+      console.error('Failed to load activity:', error);
+    }
+  };
+
+  const handleClearNotifications = () => {
+    if (activities.length > 0) {
+      setLastSeenTime(activities[0].time);
+    }
+    setShowNotifications(false);
+  };
+
+  // Count unseen notifications
+  const unseenCount = lastSeenTime 
+    ? activities.filter(a => new Date(a.time) > new Date(lastSeenTime)).length 
+    : activities.length;
 
   const loadEmployeeHours = async () => {
     setLoadingHours(true);
@@ -319,6 +383,7 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
 
   useEffect(() => {
     loadRequests();
+    loadRecentActivity();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [business.id]);
 
@@ -328,6 +393,15 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, startDate, endDate]);
+
+  // Refresh activity periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadRecentActivity();
+    }, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [business.id]);
 
   // Filter employees by search
   const filteredEmployees = allEmployees.filter(emp => {
@@ -395,9 +469,77 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
       <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white">
         <div className="max-w-6xl mx-auto px-4 py-6">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold">{business.name}</h1>
-              <p className="text-slate-400">Admin Dashboard</p>
+            <div className="flex items-center gap-4">
+              {/* Notification Bell */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors relative"
+                >
+                  <span className="text-xl">🔔</span>
+                  {unseenCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
+                      {unseenCount > 9 ? '9+' : unseenCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* Notification Popup */}
+                {showNotifications && (
+                  <div className="absolute top-full left-0 mt-2 w-80 bg-white rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="bg-slate-800 px-4 py-3">
+                      <h3 className="font-semibold text-white">Recent Activity</h3>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto">
+                      {activities.length === 0 ? (
+                        <div className="p-6 text-center text-gray-500">
+                          <p className="text-3xl mb-2">😴</p>
+                          <p>No recent activity</p>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-gray-100">
+                          {activities.map((activity) => {
+                            const isUnseen = !lastSeenTime || new Date(activity.time) > new Date(lastSeenTime);
+                            return (
+                              <div
+                                key={activity.id}
+                                className={`px-4 py-3 ${isUnseen ? 'bg-blue-50' : ''}`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg">
+                                    {activity.action === 'clock_in' ? '🟢' : '🔴'}
+                                  </span>
+                                  <div className="flex-1">
+                                    <p className="font-medium text-gray-900 text-sm">
+                                      {activity.employeeName}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      {activity.action === 'clock_in' ? 'Clocked In' : 'Clocked Out'} • {formatDateTime(activity.time)}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <div className="border-t border-gray-100 p-3">
+                      <button
+                        onClick={handleClearNotifications}
+                        className="w-full py-2 bg-green-500 hover:bg-green-600 text-white font-medium rounded-lg transition-colors"
+                      >
+                        ✓ All caught up
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h1 className="text-2xl font-bold">{business.name}</h1>
+                <p className="text-slate-400">Admin Dashboard</p>
+              </div>
             </div>
             <div className="flex items-center gap-4">
               <span className="text-slate-400 text-sm">ID: {business.business_code}</span>

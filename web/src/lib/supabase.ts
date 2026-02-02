@@ -245,6 +245,19 @@ export async function getTimeEntriesByEmployee(employeeId: string, limit: number
   return data || [];
 }
 
+// Get recent time entries for a business (for admin notifications)
+export async function getRecentTimeEntriesByBusiness(businessId: string, limit: number = 20): Promise<TimeEntry[]> {
+  const { data, error } = await supabase
+    .from('time_entries')
+    .select('*')
+    .eq('business_id', businessId)
+    .order('clock_in_time', { ascending: false })
+    .limit(limit);
+  
+  if (error) throw error;
+  return data || [];
+}
+
 // Get business by ID
 export async function getBusinessById(businessId: string): Promise<Business | null> {
   const { data, error } = await supabase
