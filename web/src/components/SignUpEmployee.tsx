@@ -23,7 +23,7 @@ interface Props {
   onSuccess: () => void;
 }
 
-type Status = 'loading' | 'warmup' | 'capturing' | 'confirming' | 'verified' | 'form' | 'error';
+type Status = 'loading' | 'capturing' | 'confirming' | 'verified' | 'form' | 'error';
 
 export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -72,10 +72,18 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
         // Wait for camera and employees
         const [, emps] = await Promise.all([cameraPromise, employeesPromise]);
         setEmployees(emps);
+        setLoadingProgress(90);
+
+        // Warm up face detection (first run is slow - do it during loading)
+        setMessage('Warming up face detection...');
+        if (videoRef.current) {
+          await new Promise(r => setTimeout(r, 100)); // Let video paint a frame
+          await detectFace(videoRef.current);
+        }
         setLoadingProgress(100);
-        
-        setStatus('warmup');
-        setMessage('Preparing face detection...');
+
+        setStatus('capturing');
+        setMessage('Position your face in the frame');
       } catch (error) {
         console.error('Init error:', error);
         setStatus('error');
@@ -189,33 +197,6 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
       setMessage('Failed to restart camera. Please refresh.');
     }
   };
-
-  // Warmup: run one detection so first (slow) run doesn't freeze "Position your face"
-  useEffect(() => {
-    if (status !== 'warmup' || !videoRef.current) return;
-
-    let cancelled = false;
-
-    const runWarmup = () => {
-      detectFace(videoRef.current!).then(() => {
-        if (cancelled) return;
-        setStatus('capturing');
-        setMessage('Position your face in the frame');
-      }).catch(() => {
-        if (!cancelled) {
-          setStatus('capturing');
-          setMessage('Position your face in the frame');
-        }
-      });
-    };
-
-    const t = setTimeout(runWarmup, 50);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [status]);
 
   // Start face detection
   useEffect(() => {
@@ -561,6 +542,14 @@ export default function SignUpEmployee({ business, onBack, onSuccess }: Props) {
                   style={{ width: `${loadingProgress}%` }}
                 />
               </div>
+              {message.includes('Warming up') && (
+                <div className="mt-2 w-full h-1.5 bg-white/10 rounded-full overflow-hidden relative">
+                  <div 
+                    className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent rounded-full"
+                    style={{ animation: 'loading-shimmer 1.5s ease-in-out infinite' }}
+                  />
+                </div>
+              )}
             </div>
           )}
 

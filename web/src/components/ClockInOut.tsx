@@ -24,7 +24,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Status = 'loading' | 'ready' | 'warmup' | 'detecting' | 'verified' | 'error';
+type Status = 'loading' | 'ready' | 'detecting' | 'verified' | 'error';
 
 const MAX_DISTANCE_METERS = 500; // Maximum distance allowed for clock in/out (in meters)
 const MAX_DISTANCE_MILES = MAX_DISTANCE_METERS / 1609.34; // Convert to miles for calculation
@@ -126,8 +126,16 @@ export default function ClockInOut({ business, onBack }: Props) {
         // Wait for camera and employees
         const [, emps] = await Promise.all([cameraPromise, employeesPromise]);
         setEmployees(emps);
+        setLoadingProgress(90);
+
+        // Warm up face detection (first run is slow - do it during loading so we show progress)
+        setMessage('Warming up face detection...');
+        if (videoRef.current) {
+          await new Promise(r => setTimeout(r, 100)); // Let video paint a frame
+          await detectFace(videoRef.current);
+        }
         setLoadingProgress(100);
-        
+
         setStatus('ready');
         setMessage('Position your face in the frame');
       } catch (error) {
@@ -183,51 +191,17 @@ export default function ClockInOut({ business, onBack }: Props) {
     setStatus('ready');
   };
 
-  // Warmup: run one detection off main thread so first (slow) run doesn't freeze "Looking for your face"
-  useEffect(() => {
-    if (status !== 'warmup' || !videoRef.current) return;
-    const currentEmployees = employeesRef.current;
-    if (currentEmployees.length === 0) {
-      setStatus('detecting');
-      setMessage('Looking for your face...');
-      return;
-    }
-
-    let cancelled = false;
-
-    const runWarmup = () => {
-      detectFace(videoRef.current!).then(() => {
-        if (cancelled) return;
-        setStatus('detecting');
-        setMessage('Looking for your face...');
-        matchTrackerRef.current.reset();
-      }).catch(() => {
-        if (!cancelled) {
-          setStatus('detecting');
-          setMessage('Looking for your face...');
-        }
-      });
-    };
-
-    // Let "Preparing..." paint first, then run warmup
-    const t = setTimeout(runWarmup, 50);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [status]);
-
-  // Start face detection when ready (transition to warmup) or when detecting (run interval)
+  // Start face detection when ready (transition to detecting) or when detecting (run interval)
   useEffect(() => {
     if (status !== 'ready' && status !== 'detecting') return;
     if (!videoRef.current) return;
     if (matchedEmployee) return; // Already matched
 
-    // When ready, show warmup message and transition to warmup (warmup effect will run one detection then set detecting)
+    // When ready, go straight to detecting (warmup already done during loading)
     if (status === 'ready') {
-      setStatus('warmup');
-      setMessage('Preparing face detection...');
+      setStatus('detecting');
+      setMessage('Looking for your face...');
+      matchTrackerRef.current.reset();
       return;
     }
 
@@ -395,6 +369,15 @@ export default function ClockInOut({ business, onBack }: Props) {
                   style={{ width: `${loadingProgress}%` }}
                 />
               </div>
+              {/* Indeterminate bar during "Warming up" (first detection is slow) */}
+              {message.includes('Warming up') && (
+                <div className="mt-2 w-full h-1.5 bg-white/10 rounded-full overflow-hidden relative">
+                  <div 
+                    className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent rounded-full"
+                    style={{ animation: 'loading-shimmer 1.5s ease-in-out infinite' }}
+                  />
+                </div>
+              )}
             </div>
           )}
 

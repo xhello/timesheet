@@ -22,7 +22,7 @@ import {
 } from '@/lib/faceDetection';
 
 type View = 'auth' | 'dashboard';
-type AuthStatus = 'loading' | 'ready' | 'warmup' | 'detecting' | 'verified' | 'error';
+type AuthStatus = 'loading' | 'ready' | 'detecting' | 'verified' | 'error';
 
 export default function EmployeePortal() {
   const [view, setView] = useState<View>('auth');
@@ -136,13 +136,22 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
         const emps = await getAllEmployees();
         if (!mounted) return;
         setEmployees(emps);
-        setLoadingProgress(100);
+        setLoadingProgress(90);
         
         if (emps.length === 0) {
           setStatus('error');
           setMessage('No employees registered in the system.');
           return;
         }
+        
+        // Warm up face detection (first run is slow - do it during loading)
+        setMessage('Warming up face detection...');
+        if (videoRef.current) {
+          await new Promise(r => setTimeout(r, 100)); // Let video paint a frame
+          await detectFace(videoRef.current);
+        }
+        if (!mounted) return;
+        setLoadingProgress(100);
         
         setStatus('ready');
         setMessage('Position your face to authenticate');
@@ -169,49 +178,16 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
     };
   }, []);
 
-  // Transition from ready to warmup (warmup runs one detection then sets detecting)
+  // Transition from ready to detecting (warmup already done during loading)
   useEffect(() => {
     if (status === 'ready') {
       const timer = setTimeout(() => {
-        setStatus('warmup');
-        setMessage('Preparing face detection...');
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [status]);
-
-  // Warmup: run one detection so first (slow) run doesn't freeze "Looking for your face"
-  useEffect(() => {
-    if (status !== 'warmup' || !videoRef.current) return;
-    const currentEmployees = employeesRef.current;
-    if (currentEmployees.length === 0) {
-      setStatus('detecting');
-      setMessage('Looking for your face...');
-      return;
-    }
-
-    let cancelled = false;
-
-    const runWarmup = () => {
-      detectFace(videoRef.current!).then(() => {
-        if (cancelled) return;
         setStatus('detecting');
         setMessage('Looking for your face...');
         matchTrackerRef.current.reset();
-      }).catch(() => {
-        if (!cancelled) {
-          setStatus('detecting');
-          setMessage('Looking for your face...');
-        }
-      });
-    };
-
-    const t = setTimeout(runWarmup, 50);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
+      }, 0);
+      return () => clearTimeout(timer);
+    }
   }, [status]);
 
   // Face detection
@@ -300,6 +276,14 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
                 style={{ width: `${loadingProgress}%` }}
               />
             </div>
+            {message.includes('Warming up') && (
+              <div className="mt-2 w-full h-1.5 bg-white/10 rounded-full overflow-hidden relative">
+                <div 
+                  className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent rounded-full"
+                  style={{ animation: 'loading-shimmer 1.5s ease-in-out infinite' }}
+                />
+              </div>
+            )}
           </div>
         )}
 
