@@ -106,14 +106,19 @@ export default function ClockInOut({ business, onBack }: Props) {
   useEffect(() => {
     const init = async () => {
       try {
-        setMessage('Loading face detection models...');
+        // Start camera and load employees in parallel with models
+        const cameraPromise = startCamera();
+        const employeesPromise = getEmployeesByBusiness(business.id);
+        
+        setMessage('Initializing camera...');
+        
+        // Load models (will be instant if already preloaded)
         await loadFaceModels();
         
-        setMessage('Loading employees...');
-        const emps = await getEmployeesByBusiness(business.id);
+        // Wait for camera and employees
+        const [, emps] = await Promise.all([cameraPromise, employeesPromise]);
         setEmployees(emps);
         
-        await startCamera();
         setStatus('ready');
         setMessage('Position your face in the frame');
       } catch (error) {

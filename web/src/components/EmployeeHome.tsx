@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Business } from '@/lib/supabase';
+import { preloadFaceModels, areModelsLoaded } from '@/lib/faceDetection';
 import ClockInOut from './ClockInOut';
 import SignUpEmployee from './SignUpEmployee';
 
@@ -14,6 +15,22 @@ type View = 'home' | 'clock' | 'signup';
 
 export default function EmployeeHome({ business, onLogout }: Props) {
   const [currentView, setCurrentView] = useState<View>('home');
+  const [modelsReady, setModelsReady] = useState(areModelsLoaded());
+
+  // Preload face models as soon as user reaches employee home
+  useEffect(() => {
+    preloadFaceModels();
+    
+    // Check if models are loaded periodically
+    const checkModels = setInterval(() => {
+      if (areModelsLoaded()) {
+        setModelsReady(true);
+        clearInterval(checkModels);
+      }
+    }, 500);
+
+    return () => clearInterval(checkModels);
+  }, []);
 
   if (currentView === 'clock') {
     return (
@@ -78,8 +95,17 @@ export default function EmployeeHome({ business, onLogout }: Props) {
       {/* Footer */}
       <div className="py-6 text-center">
         <div className="flex items-center justify-center gap-2 text-white/50 text-sm">
-          <div className="w-2 h-2 bg-green-400 rounded-full" />
-          <span>Online</span>
+          {modelsReady ? (
+            <>
+              <div className="w-2 h-2 bg-green-400 rounded-full" />
+              <span>Camera Ready</span>
+            </>
+          ) : (
+            <>
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <span>Loading camera...</span>
+            </>
+          )}
         </div>
       </div>
     </div>

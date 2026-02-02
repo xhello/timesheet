@@ -120,11 +120,17 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
 
     const init = async () => {
       try {
-        setMessage('Loading face detection models...');
+        setMessage('Initializing camera...');
+        
+        // Start camera and load employees in parallel with models
+        const cameraPromise = startCamera();
+        const employeesPromise = getAllEmployees();
+        
+        // Load models (will be instant if already preloaded)
         await loadFaceModels();
         
-        setMessage('Loading employee database...');
-        const emps = await getAllEmployees();
+        // Wait for camera and employees
+        const [, emps] = await Promise.all([cameraPromise, employeesPromise]);
         if (!mounted) return;
         setEmployees(emps);
         
@@ -134,7 +140,6 @@ function FaceAuth({ onSuccess }: { onSuccess: (employee: Employee) => void }) {
           return;
         }
         
-        await startCamera();
         if (!mounted) return;
         setStatus('ready');
         setMessage('Position your face to authenticate');

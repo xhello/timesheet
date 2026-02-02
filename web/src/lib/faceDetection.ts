@@ -3,6 +3,7 @@
 import * as faceapi from 'face-api.js';
 
 let modelsLoaded = false;
+let modelsLoading: Promise<void> | null = null;
 
 // Match threshold - lower = stricter matching (less false positives)
 const MATCH_THRESHOLD = 0.45;
@@ -15,23 +16,61 @@ const MIN_FACE_AREA = 15000; // pixels squared
 const MIN_DETECTION_CONFIDENCE = 0.7;
 const MIN_LIVENESS_SCORE = 0.6;
 
+// Check if models are already loaded
+export function areModelsLoaded(): boolean {
+  return modelsLoaded;
+}
+
+// Check if models are currently loading
+export function areModelsLoading(): boolean {
+  return modelsLoading !== null && !modelsLoaded;
+}
+
 export async function loadFaceModels(): Promise<void> {
+  // Already loaded
   if (modelsLoaded) return;
+  
+  // Already loading - wait for existing load
+  if (modelsLoading) {
+    return modelsLoading;
+  }
   
   const MODEL_URL = '/models';
   
-  try {
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-      faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-    ]);
-    modelsLoaded = true;
-    console.log('✅ Face detection models loaded');
-  } catch (error) {
-    console.error('❌ Failed to load face models:', error);
-    throw error;
-  }
+  // Start loading and store the promise
+  modelsLoading = (async () => {
+    try {
+      console.log('⏳ Loading face detection models...');
+      const startTime = Date.now();
+      
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+      ]);
+      
+      modelsLoaded = true;
+      const loadTime = Date.now() - startTime;
+      console.log(`✅ Face detection models loaded in ${loadTime}ms`);
+    } catch (error) {
+      console.error('❌ Failed to load face models:', error);
+      modelsLoading = null; // Reset so it can be retried
+      throw error;
+    }
+  })();
+  
+  return modelsLoading;
+}
+
+// Preload models in the background (call this early)
+export function preloadFaceModels(): void {
+  if (typeof window === 'undefined') return; // Server-side check
+  if (modelsLoaded || modelsLoading) return;
+  
+  // Start loading in background without blocking
+  loadFaceModels().catch(err => {
+    console.warn('Background model preload failed:', err);
+  });
 }
 
 export interface FaceDetectionResult {
