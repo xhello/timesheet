@@ -494,12 +494,11 @@ function EmployeeDashboard({
     }
   };
 
-  // Filter entries by date range
+  // Filter entries by date range (end date = today up to 23:59:59 so today's data appears)
   const filteredEntries = timeEntries.filter(entry => {
     const entryDate = new Date(entry.clock_in_time);
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999); // Include the entire end day
+    const start = new Date(startDate + 'T00:00:00'); // start of start date (local)
+    const end = new Date(endDate + 'T23:59:59.999'); // end of end date = today 23:59 (local)
     return entryDate >= start && entryDate <= end;
   });
 

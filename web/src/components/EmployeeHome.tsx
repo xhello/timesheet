@@ -73,36 +73,17 @@ export default function EmployeeHome({ business, onLogout }: Props) {
         <p className="text-white/70">Employee Portal</p>
       </div>
 
-      {/* Action Buttons */}
+      {/* Loading / Camera Ready - above buttons */}
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
-        <button
-          onClick={() => setCurrentView('clock')}
-          className="w-full max-w-md py-8 bg-green-500 hover:bg-green-600 text-white font-bold text-xl rounded-2xl shadow-lg transition-all transform hover:scale-105 flex flex-col items-center gap-2"
-        >
-          <span className="text-4xl">⏱️</span>
-          <span>Clock In / Out</span>
-        </button>
-
-        <button
-          onClick={() => setCurrentView('signup')}
-          className="w-full max-w-md py-8 bg-blue-500 hover:bg-blue-600 text-white font-bold text-xl rounded-2xl shadow-lg transition-all transform hover:scale-105 flex flex-col items-center gap-2"
-        >
-          <span className="text-4xl">👤</span>
-          <span>New Employee</span>
-        </button>
-      </div>
-
-      {/* Footer - library loading progress */}
-      <div className="py-6 px-4">
-        <div className="max-w-md mx-auto">
+        <div className="w-full max-w-md space-y-3 mb-2">
           {modelsReady ? (
-            <div className="flex items-center justify-center gap-2 text-white/50 text-sm">
-              <div className="w-2 h-2 bg-green-400 rounded-full" />
+            <div className="flex items-center justify-center gap-2 text-white/90 text-sm py-2">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
               <span>Camera Ready</span>
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-white/50 text-sm">
+              <div className="flex items-center justify-between text-white/80 text-sm">
                 <span>Loading face detection...</span>
                 <span>{loadProgress ?? 0}%</span>
               </div>
@@ -115,6 +96,33 @@ export default function EmployeeHome({ business, onLogout }: Props) {
             </div>
           )}
         </div>
+
+        {/* Action Buttons - disabled until camera ready */}
+        <button
+          onClick={() => modelsReady && setCurrentView('clock')}
+          disabled={!modelsReady}
+          className={`w-full max-w-md py-8 font-bold text-xl rounded-2xl shadow-lg transition-all flex flex-col items-center gap-2 ${
+            modelsReady
+              ? 'bg-green-500 hover:bg-green-600 text-white transform hover:scale-105 cursor-pointer'
+              : 'bg-gray-400 text-gray-200 cursor-not-allowed opacity-75'
+          }`}
+        >
+          <span className="text-4xl">⏱️</span>
+          <span>Clock In / Out</span>
+        </button>
+
+        <button
+          onClick={() => modelsReady && setCurrentView('signup')}
+          disabled={!modelsReady}
+          className={`w-full max-w-md py-8 font-bold text-xl rounded-2xl shadow-lg transition-all flex flex-col items-center gap-2 ${
+            modelsReady
+              ? 'bg-blue-500 hover:bg-blue-600 text-white transform hover:scale-105 cursor-pointer'
+              : 'bg-gray-400 text-gray-200 cursor-not-allowed opacity-75'
+          }`}
+        >
+          <span className="text-4xl">👤</span>
+          <span>New Employee</span>
+        </button>
       </div>
     </div>
   );
