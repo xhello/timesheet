@@ -8,9 +8,6 @@ import {
   getAllEmployees,
   getTimeEntriesByEmployee,
   getBusinessById,
-  getActiveTimeEntry,
-  createTimeEntry,
-  updateTimeEntry,
 } from '@/lib/supabase';
 import {
   loadFaceModels,
@@ -29,7 +26,6 @@ export default function EmployeePortal() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [business, setBusiness] = useState<Business | null>(null);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
-  const [hasActiveEntry, setHasActiveEntry] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleAuthSuccess = async (emp: Employee) => {
@@ -41,13 +37,9 @@ export default function EmployeePortal() {
       const biz = await getBusinessById(emp.business_id);
       setBusiness(biz);
       
-      // Load time entries
-      const entries = await getTimeEntriesByEmployee(emp.id);
+      // Load time entries (get more for date range filtering)
+      const entries = await getTimeEntriesByEmployee(emp.id, 500);
       setTimeEntries(entries);
-      
-      // Check active entry
-      const active = await getActiveTimeEntry(emp.id);
-      setHasActiveEntry(!!active);
       
       setView('dashboard');
     } catch (error) {
@@ -61,46 +53,7 @@ export default function EmployeePortal() {
     setEmployee(null);
     setBusiness(null);
     setTimeEntries([]);
-    setHasActiveEntry(false);
     setView('auth');
-  };
-
-  const handleClockAction = async (action: 'in' | 'out') => {
-    if (!employee || !business) return;
-    
-    setIsLoading(true);
-    try {
-      if (action === 'in') {
-        await createTimeEntry({
-          employee_id: employee.id,
-          business_id: business.id,
-          clock_in_time: new Date().toISOString(),
-          status: 'active',
-          clock_in_liveness_verified: true,
-          clock_in_liveness_score: 0.9,
-        });
-        setHasActiveEntry(true);
-      } else {
-        const activeEntry = await getActiveTimeEntry(employee.id);
-        if (activeEntry) {
-          await updateTimeEntry(activeEntry.id, {
-            clock_out_time: new Date().toISOString(),
-            status: 'completed',
-            clock_out_liveness_verified: true,
-            clock_out_liveness_score: 0.9,
-          });
-          setHasActiveEntry(false);
-        }
-      }
-      
-      // Refresh time entries
-      const entries = await getTimeEntriesByEmployee(employee.id);
-      setTimeEntries(entries);
-    } catch (error) {
-      console.error('Clock action failed:', error);
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   if (view === 'auth') {
@@ -112,9 +65,7 @@ export default function EmployeePortal() {
       employee={employee!}
       business={business}
       timeEntries={timeEntries}
-      hasActiveEntry={hasActiveEntry}
       isLoading={isLoading}
-      onClockAction={handleClockAction}
       onLogout={handleLogout}
     />
   );
@@ -353,38 +304,74 @@ function EmployeeDashboard({
   employee,
   business,
   timeEntries,
-  hasActiveEntry,
   isLoading,
-  onClockAction,
   onLogout,
 }: {
   employee: Employee;
   business: Business | null;
   timeEntries: TimeEntry[];
-  hasActiveEntry: boolean;
   isLoading: boolean;
-  onClockAction: (action: 'in' | 'out') => void;
   onLogout: () => void;
 }) {
-  // Calculate total hours this week
-  const getWeeklyHours = () => {
-    const now = new Date();
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - now.getDay());
-    startOfWeek.setHours(0, 0, 0, 0);
+  // Date range state - default to current month
+  const today = new Date();
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  
+  const [startDate, setStartDate] = useState(firstDayOfMonth.toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
 
+  // Filter entries by date range
+  const filteredEntries = timeEntries.filter(entry => {
+    const entryDate = new Date(entry.clock_in_time);
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // Include the entire end day
+    return entryDate >= start && entryDate <= end;
+  });
+
+  // Calculate total hours in date range
+  const calculateTotalHours = () => {
     let totalMinutes = 0;
-    timeEntries.forEach(entry => {
-      const clockIn = new Date(entry.clock_in_time);
-      if (clockIn >= startOfWeek) {
-        const clockOut = entry.clock_out_time ? new Date(entry.clock_out_time) : new Date();
+    filteredEntries.forEach(entry => {
+      if (entry.clock_out_time) {
+        const clockIn = new Date(entry.clock_in_time);
+        const clockOut = new Date(entry.clock_out_time);
         totalMinutes += (clockOut.getTime() - clockIn.getTime()) / (1000 * 60);
       }
     });
 
     const hours = Math.floor(totalMinutes / 60);
     const minutes = Math.round(totalMinutes % 60);
-    return `${hours}h ${minutes}m`;
+    return { hours, minutes, totalMinutes };
+  };
+
+  const totalTime = calculateTotalHours();
+
+  // Quick date range presets
+  const setDatePreset = (preset: 'today' | 'week' | 'month' | 'last-month') => {
+    const now = new Date();
+    let start: Date;
+    let end: Date = now;
+
+    switch (preset) {
+      case 'today':
+        start = now;
+        break;
+      case 'week':
+        start = new Date(now);
+        start.setDate(now.getDate() - now.getDay());
+        break;
+      case 'month':
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+      case 'last-month':
+        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        end = new Date(now.getFullYear(), now.getMonth(), 0);
+        break;
+    }
+
+    setStartDate(start.toISOString().split('T')[0]);
+    setEndDate(end.toISOString().split('T')[0]);
   };
 
   const formatDate = (dateStr: string) => {
@@ -403,8 +390,9 @@ function EmployeeDashboard({
   };
 
   const calculateDuration = (clockIn: string, clockOut: string | null) => {
+    if (!clockOut) return 'In Progress';
     const start = new Date(clockIn);
-    const end = clockOut ? new Date(clockOut) : new Date();
+    const end = new Date(clockOut);
     const diffMs = end.getTime() - start.getTime();
     const hours = Math.floor(diffMs / (1000 * 60 * 60));
     const minutes = Math.round((diffMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -433,69 +421,120 @@ function EmployeeDashboard({
 
       {/* Main Content */}
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <p className="text-gray-500 text-sm">This Week</p>
-            <p className="text-3xl font-bold text-gray-900">{getWeeklyHours()}</p>
+        {/* Date Range Picker */}
+        <div className="bg-white rounded-xl p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Select Date Range</h2>
+          
+          {/* Quick Presets */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            <button
+              onClick={() => setDatePreset('today')}
+              className="px-3 py-1.5 text-sm bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors"
+            >
+              Today
+            </button>
+            <button
+              onClick={() => setDatePreset('week')}
+              className="px-3 py-1.5 text-sm bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors"
+            >
+              This Week
+            </button>
+            <button
+              onClick={() => setDatePreset('month')}
+              className="px-3 py-1.5 text-sm bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors"
+            >
+              This Month
+            </button>
+            <button
+              onClick={() => setDatePreset('last-month')}
+              className="px-3 py-1.5 text-sm bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors"
+            >
+              Last Month
+            </button>
           </div>
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <p className="text-gray-500 text-sm">Status</p>
-            <p className={`text-xl font-bold ${hasActiveEntry ? 'text-green-600' : 'text-gray-400'}`}>
-              {hasActiveEntry ? 'Clocked In' : 'Clocked Out'}
+
+          {/* Date Inputs */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Total Hours Summary */}
+        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-6 shadow-lg text-white">
+          <div className="text-center">
+            <p className="text-white/80 text-sm mb-2">Total Hours Worked</p>
+            <p className="text-5xl font-bold mb-2">
+              {totalTime.hours}<span className="text-3xl">h</span> {totalTime.minutes}<span className="text-3xl">m</span>
+            </p>
+            <p className="text-white/60 text-sm">
+              {filteredEntries.length} {filteredEntries.length === 1 ? 'entry' : 'entries'} found
             </p>
           </div>
         </div>
 
-        {/* Clock In/Out Button */}
-        <div className="bg-white rounded-xl p-6 shadow-sm">
-          {hasActiveEntry ? (
-            <button
-              onClick={() => onClockAction('out')}
-              disabled={isLoading}
-              className="w-full py-4 bg-red-500 hover:bg-red-600 disabled:bg-gray-400 text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
-            >
-              {isLoading ? (
-                <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <span className="text-2xl">🕐</span>
-                  <span>Clock Out</span>
-                </>
-              )}
-            </button>
-          ) : (
-            <button
-              onClick={() => onClockAction('in')}
-              disabled={isLoading}
-              className="w-full py-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-bold text-xl rounded-xl transition-colors flex items-center justify-center gap-3"
-            >
-              {isLoading ? (
-                <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <span className="text-2xl">⏱️</span>
-                  <span>Clock In</span>
-                </>
-              )}
-            </button>
-          )}
+        {/* Stats Grid */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-white rounded-xl p-4 shadow-sm text-center">
+            <p className="text-gray-500 text-xs mb-1">Total Days</p>
+            <p className="text-2xl font-bold text-gray-900">
+              {new Set(filteredEntries.map(e => new Date(e.clock_in_time).toDateString())).size}
+            </p>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm text-center">
+            <p className="text-gray-500 text-xs mb-1">Avg per Day</p>
+            <p className="text-2xl font-bold text-gray-900">
+              {(() => {
+                const days = new Set(filteredEntries.map(e => new Date(e.clock_in_time).toDateString())).size;
+                if (days === 0) return '0h';
+                const avgMinutes = totalTime.totalMinutes / days;
+                const h = Math.floor(avgMinutes / 60);
+                const m = Math.round(avgMinutes % 60);
+                return `${h}h ${m}m`;
+              })()}
+            </p>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm text-center">
+            <p className="text-gray-500 text-xs mb-1">Entries</p>
+            <p className="text-2xl font-bold text-gray-900">{filteredEntries.length}</p>
+          </div>
         </div>
 
-        {/* Time Entries */}
+        {/* Time Entries List */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Time Entries</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Time Entries</h2>
           </div>
           
-          {timeEntries.length === 0 ? (
+          {isLoading ? (
+            <div className="px-6 py-12 text-center">
+              <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mx-auto" />
+            </div>
+          ) : filteredEntries.length === 0 ? (
             <div className="px-6 py-12 text-center text-gray-500">
-              <p>No time entries yet</p>
+              <p className="text-4xl mb-2">📅</p>
+              <p>No time entries in this date range</p>
             </div>
           ) : (
-            <div className="divide-y divide-gray-100">
-              {timeEntries.map((entry) => (
-                <div key={entry.id} className="px-6 py-4 flex items-center justify-between">
+            <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+              {filteredEntries.map((entry) => (
+                <div key={entry.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
                   <div>
                     <p className="font-medium text-gray-900">{formatDate(entry.clock_in_time)}</p>
                     <p className="text-sm text-gray-500">
@@ -506,7 +545,7 @@ function EmployeeDashboard({
                     <p className={`font-semibold ${entry.clock_out_time ? 'text-gray-900' : 'text-green-600'}`}>
                       {calculateDuration(entry.clock_in_time, entry.clock_out_time)}
                     </p>
-                    <p className={`text-xs px-2 py-1 rounded-full ${
+                    <p className={`text-xs px-2 py-1 rounded-full inline-block ${
                       entry.status === 'active' 
                         ? 'bg-green-100 text-green-700' 
                         : entry.status === 'completed'
