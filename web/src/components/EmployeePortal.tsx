@@ -4,11 +4,13 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Employee,
   TimeEntry,
+  TimeChangeRequest,
   Business,
   getAllEmployees,
   getTimeEntriesByEmployee,
   getBusinessById,
   createTimeChangeRequest,
+  getTimeChangeRequestsByEmployee,
 } from '@/lib/supabase';
 import {
   loadFaceModels,
@@ -27,6 +29,7 @@ export default function EmployeePortal() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [business, setBusiness] = useState<Business | null>(null);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+  const [changeRequests, setChangeRequests] = useState<TimeChangeRequest[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleAuthSuccess = async (emp: Employee) => {
@@ -41,6 +44,10 @@ export default function EmployeePortal() {
       // Load time entries (get more for date range filtering)
       const entries = await getTimeEntriesByEmployee(emp.id, 500);
       setTimeEntries(entries);
+
+      // Load change requests
+      const requests = await getTimeChangeRequestsByEmployee(emp.id);
+      setChangeRequests(requests);
       
       setView('dashboard');
     } catch (error) {
@@ -54,6 +61,7 @@ export default function EmployeePortal() {
     setEmployee(null);
     setBusiness(null);
     setTimeEntries([]);
+    setChangeRequests([]);
     setView('auth');
   };
 
@@ -66,6 +74,7 @@ export default function EmployeePortal() {
       employee={employee!}
       business={business}
       timeEntries={timeEntries}
+      changeRequests={changeRequests}
       isLoading={isLoading}
       onLogout={handleLogout}
     />
@@ -305,12 +314,14 @@ function EmployeeDashboard({
   employee,
   business,
   timeEntries,
+  changeRequests,
   isLoading,
   onLogout,
 }: {
   employee: Employee;
   business: Business | null;
   timeEntries: TimeEntry[];
+  changeRequests: TimeChangeRequest[];
   isLoading: boolean;
   onLogout: () => void;
 }) {
@@ -320,6 +331,10 @@ function EmployeeDashboard({
   
   const [startDate, setStartDate] = useState(firstDayOfMonth.toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
+
+  // Notification state
+  const [showNotifications, setShowNotifications] = useState(false);
+  const pendingCount = changeRequests.filter(r => r.status === 'pending').length;
 
   // Edit modal state
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
@@ -469,15 +484,96 @@ function EmployeeDashboard({
               <h1 className="text-2xl font-bold">{employee.full_name}</h1>
               <p className="text-white/80">{business?.name || 'Employee'}</p>
             </div>
-            <button
-              onClick={onLogout}
-              className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
-            >
-              Logout
-            </button>
+            <div className="flex items-center gap-3">
+              {/* Notification Bell */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className="relative p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  {(changeRequests.length > 0) && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                      {changeRequests.length}
+                    </span>
+                  )}
+                </button>
+
+                {/* Notification Dropdown */}
+                {showNotifications && (
+                  <div className="absolute right-0 top-12 w-80 bg-white rounded-xl shadow-xl z-50 overflow-hidden">
+                    <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
+                      <h3 className="font-semibold text-gray-900">Change Requests</h3>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto">
+                      {changeRequests.length === 0 ? (
+                        <div className="p-6 text-center text-gray-500">
+                          <p>No change requests</p>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-gray-100">
+                          {changeRequests.map((request) => (
+                            <div key={request.id} className="p-4 hover:bg-gray-50">
+                              <div className="flex items-start justify-between mb-1">
+                                <p className="text-sm font-medium text-gray-900">
+                                  {new Date(request.requested_clock_in).toLocaleDateString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                  })}
+                                </p>
+                                <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                                  request.status === 'pending'
+                                    ? 'bg-yellow-100 text-yellow-700'
+                                    : request.status === 'approved'
+                                      ? 'bg-green-100 text-green-700'
+                                      : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {request.status === 'pending' ? 'Pending' : request.status === 'approved' ? 'Approved' : 'Declined'}
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-500 mb-1">
+                                {new Date(request.requested_clock_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} - {request.requested_clock_out ? new Date(request.requested_clock_out).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                              </p>
+                              <p className="text-xs text-gray-400 line-clamp-1">{request.reason}</p>
+                              {request.reviewed_at && (
+                                <p className="text-xs text-gray-400 mt-1">
+                                  Reviewed {new Date(request.reviewed_at).toLocaleDateString()}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {pendingCount > 0 && (
+                      <div className="px-4 py-2 bg-yellow-50 border-t border-yellow-100">
+                        <p className="text-xs text-yellow-700">{pendingCount} request{pendingCount > 1 ? 's' : ''} pending review</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={onLogout}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Click outside to close notifications */}
+      {showNotifications && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setShowNotifications(false)}
+        />
+      )}
 
       {/* Main Content */}
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">

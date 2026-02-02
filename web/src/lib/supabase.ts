@@ -298,6 +298,17 @@ export async function declineTimeChangeRequest(requestId: string): Promise<void>
     .eq('id', requestId);
 }
 
+export async function getTimeChangeRequestsByEmployee(employeeId: string): Promise<TimeChangeRequest[]> {
+  const { data, error } = await supabase
+    .from('time_change_requests')
+    .select('*')
+    .eq('employee_id', employeeId)
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data || [];
+}
+
 // Generate business code
 export function generateBusinessCode(): string {
   const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
