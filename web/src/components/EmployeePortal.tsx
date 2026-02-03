@@ -22,6 +22,8 @@ import {
   MIN_LIVENESS_SCORE,
   isWarmupComplete,
   preloadAndWarmup,
+  areModelsLoaded,
+  preloadAndWarmupWithProgress,
 } from '@/lib/faceDetection';
 
 type View = 'business-id' | 'auth' | 'dashboard';
@@ -104,11 +106,26 @@ export default function EmployeePortal() {
   );
 }
 
-// Business ID step: ask for business ID, then "Check my hours" → face auth
+// Business ID step: warmup → camera ready → "Check my hours" enabled (like business portal)
 function BusinessIdStep({ onContinue }: { onContinue: (business: Business) => void }) {
   const [businessId, setBusinessId] = useState('');
   const [error, setError] = useState('');
   const [isChecking, setIsChecking] = useState(false);
+  const [modelsReady, setModelsReady] = useState(areModelsLoaded());
+  const [loadProgress, setLoadProgress] = useState<number | null>(areModelsLoaded() ? 100 : 0);
+
+  useEffect(() => {
+    if (areModelsLoaded()) {
+      setModelsReady(true);
+      setLoadProgress(100);
+      return;
+    }
+    setLoadProgress(0);
+    preloadAndWarmupWithProgress((percent) => {
+      setLoadProgress(percent);
+      if (percent === 100) setModelsReady(true);
+    }).catch(() => setLoadProgress(null));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,9 +156,33 @@ function BusinessIdStep({ onContinue }: { onContinue: (business: Business) => vo
       <div className="flex-1 flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <h1 className="text-2xl font-bold text-white text-center mb-2">Employee Portal</h1>
-          <p className="text-white/70 text-center text-sm mb-8">
+          <p className="text-white/70 text-center text-sm mb-6">
             Enter your business ID to check your hours
           </p>
+
+          {/* Warmup / Camera Ready - like business portal */}
+          <div className="mb-6 space-y-3">
+            {modelsReady ? (
+              <div className="flex items-center justify-center gap-2 text-white/90 text-sm py-2">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                <span>Camera Ready</span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-white/80 text-sm">
+                  <span>Loading face detection...</span>
+                  <span>{loadProgress ?? 0}%</span>
+                </div>
+                <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-white/60 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${loadProgress ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="business-id" className="block text-sm font-medium text-white/90 mb-2">
@@ -166,8 +207,12 @@ function BusinessIdStep({ onContinue }: { onContinue: (business: Business) => vo
             )}
             <button
               type="submit"
-              disabled={isChecking}
-              className="w-full py-4 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+              disabled={isChecking || !modelsReady}
+              className={`w-full py-4 font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${
+                modelsReady && !isChecking
+                  ? 'bg-indigo-500 hover:bg-indigo-600 text-white cursor-pointer'
+                  : 'bg-gray-400 text-gray-200 cursor-not-allowed opacity-75'
+              }`}
             >
               {isChecking ? (
                 <>
@@ -382,37 +427,31 @@ function FaceAuth({
         <div className="w-24" />
       </div>
 
-      {/* Camera View - loading / Camera Ready like business portal */}
+      {/* Camera View */}
       <div className="flex-1 flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md mb-4">
-          {status === 'loading' ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-white/80 text-sm">
-                <span>Loading face detection...</span>
-                <span>{loadingProgress}%</span>
-              </div>
-              <div className="h-2 bg-white/20 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-white/60 rounded-full transition-all duration-300 ease-out"
-                  style={{ width: `${loadingProgress}%` }}
+        {/* Loading Progress Bar */}
+        {status === 'loading' && (
+          <div className="w-full max-w-md mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-white/80">{message}</span>
+              <span className="text-sm text-white/60">{loadingProgress}%</span>
+            </div>
+            <div className="w-full h-2 bg-white/20 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-300 ease-out"
+                style={{ width: `${loadingProgress}%` }}
+              />
+            </div>
+            {message.includes('Warming up') && (
+              <div className="mt-2 w-full h-1.5 bg-white/10 rounded-full overflow-hidden relative">
+                <div 
+                  className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent rounded-full"
+                  style={{ animation: 'loading-shimmer 1.5s ease-in-out infinite' }}
                 />
               </div>
-              {message.includes('Warming up') && (
-                <div className="mt-1 w-full h-1.5 bg-white/10 rounded-full overflow-hidden relative">
-                  <div
-                    className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent rounded-full"
-                    style={{ animation: 'loading-shimmer 1.5s ease-in-out infinite' }}
-                  />
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center justify-center gap-2 text-white/90 text-sm py-2">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              <span>Camera Ready</span>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         <div className="relative w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden shadow-2xl">
           <video
