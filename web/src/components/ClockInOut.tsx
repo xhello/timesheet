@@ -38,6 +38,7 @@ export default function ClockInOut({ business, onBack }: Props) {
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const employeesRef = useRef<Employee[]>([]);
   const matchTrackerRef = useRef<ConsecutiveMatchTracker>(new ConsecutiveMatchTracker());
+  const clockActionInProgressRef = useRef(false);
 
   const [status, setStatus] = useState<Status>('loading');
   const [message, setMessage] = useState('Loading face detection...');
@@ -303,14 +304,18 @@ export default function ClockInOut({ business, onBack }: Props) {
   }, [status, matchedEmployee]);
 
   const handleClockIn = async () => {
-    if (!matchedEmployee || isProcessing) return;
-    
+    if (!matchedEmployee) return;
+    if (clockActionInProgressRef.current) return;
+    clockActionInProgressRef.current = true;
+    setIsProcessing(true);
+
     if (!isWithinRange) {
       setMessage(`You must be within ${MAX_DISTANCE_METERS}m of the business to clock in.`);
+      clockActionInProgressRef.current = false;
+      setIsProcessing(false);
       return;
     }
 
-    setIsProcessing(true);
     try {
       await createTimeEntry({
         employee_id: matchedEmployee.id,
@@ -325,23 +330,29 @@ export default function ClockInOut({ business, onBack }: Props) {
 
       setMessage('Clocked in successfully!');
       setTimeout(() => onBack(), 2000);
+      // Keep ref true so extra taps before navigate are ignored
     } catch (error) {
       console.error('Clock in error:', error);
       setMessage('Failed to clock in. Please try again.');
+      clockActionInProgressRef.current = false;
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleClockOut = async () => {
-    if (!matchedEmployee || isProcessing) return;
-    
+    if (!matchedEmployee) return;
+    if (clockActionInProgressRef.current) return;
+    clockActionInProgressRef.current = true;
+    setIsProcessing(true);
+
     if (!isWithinRange) {
       setMessage(`You must be within ${MAX_DISTANCE_METERS}m of the business to clock out.`);
+      clockActionInProgressRef.current = false;
+      setIsProcessing(false);
       return;
     }
 
-    setIsProcessing(true);
     try {
       const activeEntry = await getActiveTimeEntry(matchedEmployee.id);
       
@@ -357,10 +368,15 @@ export default function ClockInOut({ business, onBack }: Props) {
 
         setMessage('Clocked out successfully!');
         setTimeout(() => onBack(), 2000);
+        // Keep ref true so extra taps before navigate are ignored
+      } else {
+        setMessage('No active clock-in found. Please try again.');
+        clockActionInProgressRef.current = false;
       }
     } catch (error) {
       console.error('Clock out error:', error);
       setMessage('Failed to clock out. Please try again.');
+      clockActionInProgressRef.current = false;
     } finally {
       setIsProcessing(false);
     }
