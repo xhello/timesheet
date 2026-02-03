@@ -382,31 +382,37 @@ function FaceAuth({
         <div className="w-24" />
       </div>
 
-      {/* Camera View */}
+      {/* Camera View - loading / Camera Ready like business portal */}
       <div className="flex-1 flex flex-col items-center justify-center p-4">
-        {/* Loading Progress Bar */}
-        {status === 'loading' && (
-          <div className="w-full max-w-md mb-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-white/80">{message}</span>
-              <span className="text-sm text-white/60">{loadingProgress}%</span>
-            </div>
-            <div className="w-full h-2 bg-white/20 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-300 ease-out"
-                style={{ width: `${loadingProgress}%` }}
-              />
-            </div>
-            {message.includes('Warming up') && (
-              <div className="mt-2 w-full h-1.5 bg-white/10 rounded-full overflow-hidden relative">
-                <div 
-                  className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent rounded-full"
-                  style={{ animation: 'loading-shimmer 1.5s ease-in-out infinite' }}
+        <div className="w-full max-w-md mb-4">
+          {status === 'loading' ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-white/80 text-sm">
+                <span>Loading face detection...</span>
+                <span>{loadingProgress}%</span>
+              </div>
+              <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-white/60 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${loadingProgress}%` }}
                 />
               </div>
-            )}
-          </div>
-        )}
+              {message.includes('Warming up') && (
+                <div className="mt-1 w-full h-1.5 bg-white/10 rounded-full overflow-hidden relative">
+                  <div
+                    className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent rounded-full"
+                    style={{ animation: 'loading-shimmer 1.5s ease-in-out infinite' }}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-2 text-white/90 text-sm py-2">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              <span>Camera Ready</span>
+            </div>
+          )}
+        </div>
 
         <div className="relative w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden shadow-2xl">
           <video
