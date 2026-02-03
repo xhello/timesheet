@@ -141,10 +141,37 @@ function AdminLogin({ onLogin }: { onLogin: (business: Business) => void }) {
   );
 }
 
-// Employee with time entries
+const REGULAR_HOURS_PER_DAY = 8;
+
+// Employee with time entries and regular/overtime split (overtime = hours over 8 per day)
 interface EmployeeWithHours extends Employee {
   timeEntries: TimeEntry[];
   totalHours: number;
+  regularHours: number;
+  overtimeHours: number;
+}
+
+function computeRegularAndOvertime(entries: TimeEntry[]): { regularHours: number; overtimeHours: number } {
+  const minutesByDay = new Map<string, number>();
+  for (const entry of entries) {
+    if (!entry.clock_out_time) continue;
+    const clockIn = new Date(entry.clock_in_time);
+    const clockOut = new Date(entry.clock_out_time);
+    const dayKey = `${clockIn.getFullYear()}-${String(clockIn.getMonth() + 1).padStart(2, '0')}-${String(clockIn.getDate()).padStart(2, '0')}`;
+    const mins = (clockOut.getTime() - clockIn.getTime()) / (1000 * 60);
+    minutesByDay.set(dayKey, (minutesByDay.get(dayKey) ?? 0) + mins);
+  }
+  let regularMinutes = 0;
+  let overtimeMinutes = 0;
+  const capMinutes = REGULAR_HOURS_PER_DAY * 60;
+  minutesByDay.forEach((dayMinutes) => {
+    regularMinutes += Math.min(dayMinutes, capMinutes);
+    overtimeMinutes += Math.max(0, dayMinutes - capMinutes);
+  });
+  return {
+    regularHours: Math.round(regularMinutes / 60 * 10) / 10,
+    overtimeHours: Math.round(overtimeMinutes / 60 * 10) / 10,
+  };
 }
 
 // Activity item for notifications
@@ -303,18 +330,21 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
           return entryDate >= start && entryDate <= end;
         });
 
-        // Calculate total hours
+        // Calculate total hours and regular/overtime (8h per day = regular, rest = overtime)
         let totalMs = 0;
         for (const entry of filteredEntries) {
           if (entry.clock_out_time) {
             totalMs += new Date(entry.clock_out_time).getTime() - new Date(entry.clock_in_time).getTime();
           }
         }
+        const { regularHours, overtimeHours } = computeRegularAndOvertime(filteredEntries);
 
         empsWithHours.push({
           ...emp,
           timeEntries: filteredEntries,
-          totalHours: totalMs / (1000 * 60 * 60),
+          totalHours: Math.round((totalMs / (1000 * 60 * 60)) * 10) / 10,
+          regularHours,
+          overtimeHours,
         });
       }
 
@@ -346,18 +376,21 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
           return entryDate >= reportStart && entryDate <= reportEnd;
         });
 
-        // Calculate total hours
+        // Calculate total hours and regular/overtime (8h per day = regular, rest = overtime)
         let totalMs = 0;
         for (const entry of filteredEntries) {
           if (entry.clock_out_time) {
             totalMs += new Date(entry.clock_out_time).getTime() - new Date(entry.clock_in_time).getTime();
           }
         }
+        const { regularHours, overtimeHours } = computeRegularAndOvertime(filteredEntries);
 
         empsWithHours.push({
           ...emp,
           timeEntries: filteredEntries,
-          totalHours: totalMs / (1000 * 60 * 60),
+          totalHours: Math.round((totalMs / (1000 * 60 * 60)) * 10) / 10,
+          regularHours,
+          overtimeHours,
         });
       }
 
@@ -375,15 +408,19 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
   const downloadCSV = () => {
     if (reportData.length === 0) return;
 
-    const headers = ['Employee Name', 'Email', 'Phone', 'Total Hours', 'Total Entries'];
+    const headers = ['Employee Name', 'Email', 'Phone', 'Total Hours', 'Regular Hours', 'Overtime Hours', 'Total Entries'];
     const rows = reportData.map(emp => [
       emp.full_name,
       emp.email || '',
       emp.phone || '',
       emp.totalHours.toFixed(2),
+      emp.regularHours.toFixed(2),
+      emp.overtimeHours.toFixed(2),
       emp.timeEntries.length.toString(),
     ]);
 
+    const totalRegular = reportData.reduce((acc, emp) => acc + emp.regularHours, 0);
+    const totalOvertime = reportData.reduce((acc, emp) => acc + emp.overtimeHours, 0);
     const csvContent = [
       `TimeSheet Report - ${business.name}`,
       `Date Range: ${formatDateTime(reportStartDate)} to ${formatDateTime(reportEndDate)}`,
@@ -394,6 +431,8 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
       '',
       `Total Employees: ${reportData.length}`,
       `Total Hours: ${reportData.reduce((acc, emp) => acc + emp.totalHours, 0).toFixed(2)}`,
+      `Regular Hours: ${totalRegular.toFixed(2)}`,
+      `Overtime Hours: ${totalOvertime.toFixed(2)}`,
     ].join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -924,13 +963,15 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                 <div className="space-y-3">
                   {/* Summary Header */}
                   <div className="bg-indigo-50 rounded-lg p-4 mb-4">
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
                       <span className="text-indigo-700 font-medium">
                         {filteredEmployees.length} employee{filteredEmployees.length !== 1 ? 's' : ''}
                       </span>
-                      <span className="text-indigo-700 font-bold">
-                        Total: {filteredEmployees.reduce((acc, emp) => acc + emp.totalHours, 0).toFixed(1)} hrs
-                      </span>
+                      <div className="flex flex-wrap gap-4 text-indigo-700">
+                        <span className="font-medium">Total: {filteredEmployees.reduce((acc, emp) => acc + emp.totalHours, 0).toFixed(1)} hrs</span>
+                        <span>Regular: {filteredEmployees.reduce((acc, emp) => acc + emp.regularHours, 0).toFixed(1)} hrs</span>
+                        <span className="font-semibold text-amber-600">Overtime: {filteredEmployees.reduce((acc, emp) => acc + emp.overtimeHours, 0).toFixed(1)} hrs</span>
+                      </div>
                     </div>
                   </div>
 
@@ -951,9 +992,11 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                         </div>
                         <div className="text-right">
                           <p className="text-2xl font-bold text-indigo-600">
-                            {emp.totalHours.toFixed(1)}
+                            {emp.totalHours.toFixed(1)} <span className="text-sm font-normal text-gray-500">hrs</span>
                           </p>
-                          <p className="text-xs text-gray-500">hours</p>
+                          <p className="text-xs text-gray-500">
+                            {emp.regularHours.toFixed(1)} reg · <span className="text-amber-600 font-medium">{emp.overtimeHours.toFixed(1)} OT</span>
+                          </p>
                         </div>
                       </div>
 
@@ -1074,7 +1117,7 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                         <span>Download CSV</span>
                       </button>
                     </div>
-                    <div className="grid grid-cols-3 gap-4 text-center">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
                       <div className="bg-white/10 rounded-lg p-3">
                         <p className="text-3xl font-bold">{reportData.length}</p>
                         <p className="text-sm text-white/80">Employees</p>
@@ -1087,9 +1130,15 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                       </div>
                       <div className="bg-white/10 rounded-lg p-3">
                         <p className="text-3xl font-bold">
-                          {reportData.reduce((acc, emp) => acc + emp.timeEntries.length, 0)}
+                          {reportData.reduce((acc, emp) => acc + emp.regularHours, 0).toFixed(1)}
                         </p>
-                        <p className="text-sm text-white/80">Total Entries</p>
+                        <p className="text-sm text-white/80">Regular</p>
+                      </div>
+                      <div className="bg-white/10 rounded-lg p-3">
+                        <p className="text-3xl font-bold text-amber-200">
+                          {reportData.reduce((acc, emp) => acc + emp.overtimeHours, 0).toFixed(1)}
+                        </p>
+                        <p className="text-sm text-white/80">Overtime</p>
                       </div>
                     </div>
                     <p className="text-sm text-white/60 mt-4 text-center">
@@ -1113,6 +1162,8 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                             <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Contact</th>
                             <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Entries</th>
                             <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Hours</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Regular</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-amber-700">Overtime</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -1137,6 +1188,12 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                                 </span>
                                 <span className="text-xs text-gray-500 ml-1">hrs</span>
                               </td>
+                              <td className="px-4 py-4 text-right text-sm text-gray-600">
+                                {emp.regularHours.toFixed(1)} hrs
+                              </td>
+                              <td className="px-4 py-4 text-right text-sm font-medium text-amber-600">
+                                {emp.overtimeHours.toFixed(1)} hrs
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -1150,6 +1207,12 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                             </td>
                             <td className="px-4 py-4 text-right text-indigo-700">
                               {reportData.reduce((acc, emp) => acc + emp.totalHours, 0).toFixed(1)} hrs
+                            </td>
+                            <td className="px-4 py-4 text-right text-indigo-700">
+                              {reportData.reduce((acc, emp) => acc + emp.regularHours, 0).toFixed(1)} hrs
+                            </td>
+                            <td className="px-4 py-4 text-right text-amber-700">
+                              {reportData.reduce((acc, emp) => acc + emp.overtimeHours, 0).toFixed(1)} hrs
                             </td>
                           </tr>
                         </tfoot>
