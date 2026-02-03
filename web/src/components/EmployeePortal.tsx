@@ -532,12 +532,18 @@ function EmployeeDashboard({
   isLoading: boolean;
   onLogout: () => void;
 }) {
-  // Date range state - default to current month
+  // Date range state (with time) - default to current month, start 00:00, end 23:59
   const today = new Date();
   const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  
-  const [startDate, setStartDate] = useState(firstDayOfMonth.toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
+  const toDateTimeLocal = (d: Date, endOfDay = false) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    if (endOfDay) return `${y}-${m}-${day}T23:59`;
+    return `${y}-${m}-${day}T00:00`;
+  };
+  const [startDateTime, setStartDateTime] = useState(toDateTimeLocal(firstDayOfMonth));
+  const [endDateTime, setEndDateTime] = useState(toDateTimeLocal(today, true));
 
   // Notification state
   const [showNotifications, setShowNotifications] = useState(false);
@@ -658,11 +664,11 @@ function EmployeeDashboard({
     }
   };
 
-  // Filter entries by date range (end date = today up to 23:59:59 so today's data appears)
+  // Filter entries by date range (start and end datetime, local)
   const filteredEntries = timeEntries.filter(entry => {
     const entryDate = new Date(entry.clock_in_time);
-    const start = new Date(startDate + 'T00:00:00'); // start of start date (local)
-    const end = new Date(endDate + 'T23:59:59.999'); // end of end date = today 23:59 (local)
+    const start = new Date(startDateTime);
+    const end = new Date(endDateTime);
     return entryDate >= start && entryDate <= end;
   });
 
@@ -707,8 +713,8 @@ function EmployeeDashboard({
         break;
     }
 
-    setStartDate(start.toISOString().split('T')[0]);
-    setEndDate(end.toISOString().split('T')[0]);
+    setStartDateTime(toDateTimeLocal(start));
+    setEndDateTime(toDateTimeLocal(end, true));
   };
 
   const formatDate = (dateStr: string) => {
@@ -882,25 +888,31 @@ function EmployeeDashboard({
             </button>
           </div>
 
-          {/* Date Inputs */}
+          {/* Date & Time Inputs */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date & Time</label>
               <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                type="datetime-local"
+                value={startDateTime}
+                onChange={(e) => setStartDateTime(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
               />
+              <p className="mt-1 text-xs text-gray-500">
+                {new Date(startDateTime).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+              </p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">End Date & Time</label>
               <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                type="datetime-local"
+                value={endDateTime}
+                onChange={(e) => setEndDateTime(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
               />
+              <p className="mt-1 text-xs text-gray-500">
+                {new Date(endDateTime).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+              </p>
             </div>
           </div>
         </div>
