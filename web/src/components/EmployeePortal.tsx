@@ -672,6 +672,8 @@ function EmployeeDashboard({
     return entryDate >= start && entryDate <= end;
   });
 
+  const REGULAR_HOURS_PER_DAY = 8;
+
   // Calculate total hours in date range
   const calculateTotalHours = () => {
     let totalMinutes = 0;
@@ -688,7 +690,34 @@ function EmployeeDashboard({
     return { hours, minutes, totalMinutes };
   };
 
+  // Group by calendar day, then apply 8h/day cap: excess = overtime
+  const calculateRegularAndOvertime = () => {
+    const minutesByDay = new Map<string, number>();
+    filteredEntries.forEach(entry => {
+      if (!entry.clock_out_time) return;
+      const clockIn = new Date(entry.clock_in_time);
+      const clockOut = new Date(entry.clock_out_time);
+      const dayKey = clockIn.getFullYear() + '-' + String(clockIn.getMonth() + 1).padStart(2, '0') + '-' + String(clockIn.getDate()).padStart(2, '0');
+      const mins = (clockOut.getTime() - clockIn.getTime()) / (1000 * 60);
+      minutesByDay.set(dayKey, (minutesByDay.get(dayKey) ?? 0) + mins);
+    });
+    let regularMinutes = 0;
+    let overtimeMinutes = 0;
+    const capMinutes = REGULAR_HOURS_PER_DAY * 60;
+    minutesByDay.forEach((dayMinutes) => {
+      regularMinutes += Math.min(dayMinutes, capMinutes);
+      overtimeMinutes += Math.max(0, dayMinutes - capMinutes);
+    });
+    const toHrsMins = (m: number) => ({
+      hours: Math.floor(m / 60),
+      minutes: Math.round(m % 60),
+      totalMinutes: m,
+    });
+    return { regular: toHrsMins(regularMinutes), overtime: toHrsMins(overtimeMinutes) };
+  };
+
   const totalTime = calculateTotalHours();
+  const { regular: regularTime, overtime: overtimeTime } = calculateRegularAndOvertime();
 
   // Quick date range presets
   const setDatePreset = (preset: 'today' | 'week' | 'month' | 'last-month') => {
@@ -924,14 +953,24 @@ function EmployeeDashboard({
             <p className="text-5xl font-bold mb-2">
               {totalTime.hours}<span className="text-3xl">h</span> {totalTime.minutes}<span className="text-3xl">m</span>
             </p>
-            <p className="text-white/60 text-sm">
-              {filteredEntries.length} {filteredEntries.length === 1 ? 'entry' : 'entries'} found
+            <div className="flex flex-wrap justify-center gap-4 text-sm mt-3">
+              <span className="text-white/90">
+                Regular: {regularTime.hours}h {regularTime.minutes}m
+              </span>
+              {overtimeTime.totalMinutes > 0 && (
+                <span className="text-amber-200 font-medium">
+                  Overtime: {overtimeTime.hours}h {overtimeTime.minutes}m
+                </span>
+              )}
+            </div>
+            <p className="text-white/60 text-sm mt-2">
+              {filteredEntries.length} {filteredEntries.length === 1 ? 'entry' : 'entries'} found · Over 8h/day = overtime
             </p>
           </div>
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="bg-white rounded-xl p-4 shadow-sm text-center">
             <p className="text-gray-500 text-xs mb-1">Total Days</p>
             <p className="text-2xl font-bold text-gray-900">
@@ -952,8 +991,16 @@ function EmployeeDashboard({
             </p>
           </div>
           <div className="bg-white rounded-xl p-4 shadow-sm text-center">
-            <p className="text-gray-500 text-xs mb-1">Entries</p>
-            <p className="text-2xl font-bold text-gray-900">{filteredEntries.length}</p>
+            <p className="text-gray-500 text-xs mb-1">Regular (≤8h/day)</p>
+            <p className="text-2xl font-bold text-gray-900">
+              {regularTime.hours}h {regularTime.minutes}m
+            </p>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm text-center">
+            <p className="text-gray-500 text-xs mb-1">Overtime</p>
+            <p className="text-2xl font-bold text-amber-600">
+              {overtimeTime.hours}h {overtimeTime.minutes}m
+            </p>
           </div>
         </div>
 
