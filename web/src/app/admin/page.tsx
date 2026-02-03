@@ -170,10 +170,13 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
   const [startDate, setStartDate] = useState(() => {
     const date = new Date();
     date.setDate(1);
-    return date.toISOString().split('T')[0];
+    date.setHours(0, 0, 0, 0);
+    return date.toISOString().slice(0, 16);
   });
   const [endDate, setEndDate] = useState(() => {
-    return new Date().toISOString().split('T')[0];
+    const date = new Date();
+    date.setHours(23, 59, 0, 0);
+    return date.toISOString().slice(0, 16);
   });
   const [loadingHours, setLoadingHours] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeWithHours | null>(null);
@@ -182,10 +185,13 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
   const [reportStartDate, setReportStartDate] = useState(() => {
     const date = new Date();
     date.setDate(1);
-    return date.toISOString().split('T')[0];
+    date.setHours(0, 0, 0, 0);
+    return date.toISOString().slice(0, 16);
   });
   const [reportEndDate, setReportEndDate] = useState(() => {
-    return new Date().toISOString().split('T')[0];
+    const date = new Date();
+    date.setHours(23, 59, 0, 0);
+    return date.toISOString().slice(0, 16);
   });
   const [reportData, setReportData] = useState<EmployeeWithHours[]>([]);
   const [reportGenerated, setReportGenerated] = useState(false);
@@ -283,16 +289,18 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
   const loadEmployeeHours = async () => {
     setLoadingHours(true);
     try {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
       const emps = await getEmployeesByBusiness(business.id);
       const empsWithHours: EmployeeWithHours[] = [];
 
       for (const emp of emps) {
         const entries = await getTimeEntriesByEmployee(emp.id, 500);
         
-        // Filter by date range
+        // Filter by date range (start/end include time)
         const filteredEntries = entries.filter(entry => {
-          const entryDate = new Date(entry.clock_in_time).toISOString().split('T')[0];
-          return entryDate >= startDate && entryDate <= endDate;
+          const entryDate = new Date(entry.clock_in_time);
+          return entryDate >= start && entryDate <= end;
         });
 
         // Calculate total hours
@@ -324,16 +332,18 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     setGeneratingReport(true);
     setReportGenerated(false);
     try {
+      const reportStart = new Date(reportStartDate);
+      const reportEnd = new Date(reportEndDate);
       const emps = await getEmployeesByBusiness(business.id);
       const empsWithHours: EmployeeWithHours[] = [];
 
       for (const emp of emps) {
         const entries = await getTimeEntriesByEmployee(emp.id, 1000);
         
-        // Filter by date range
+        // Filter by date range (start/end include time)
         const filteredEntries = entries.filter(entry => {
-          const entryDate = new Date(entry.clock_in_time).toISOString().split('T')[0];
-          return entryDate >= reportStartDate && entryDate <= reportEndDate;
+          const entryDate = new Date(entry.clock_in_time);
+          return entryDate >= reportStart && entryDate <= reportEnd;
         });
 
         // Calculate total hours
@@ -376,7 +386,7 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
 
     const csvContent = [
       `TimeSheet Report - ${business.name}`,
-      `Date Range: ${reportStartDate} to ${reportEndDate}`,
+      `Date Range: ${formatDateTime(reportStartDate)} to ${formatDateTime(reportEndDate)}`,
       `Generated: ${new Date().toLocaleString()}`,
       '',
       headers.join(','),
@@ -389,7 +399,7 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `timesheet-report-${reportStartDate}-to-${reportEndDate}.csv`;
+    link.download = `timesheet-report-${reportStartDate.slice(0, 10)}-to-${reportEndDate.slice(0, 10)}.csv`;
     link.click();
   };
 
@@ -873,10 +883,10 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Start Date
+                      Start Date &amp; Time
                     </label>
                     <input
-                      type="date"
+                      type="datetime-local"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
                       className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
@@ -884,16 +894,19 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      End Date
+                      End Date &amp; Time
                     </label>
                     <input
-                      type="date"
+                      type="datetime-local"
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
                       className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
                     />
                   </div>
                 </div>
+                <p className="text-sm text-gray-500 mt-2">
+                  Range: {formatDateTime(startDate)} – {formatDateTime(endDate)}
+                </p>
               </div>
 
               {/* Employee List */}
@@ -995,10 +1008,10 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      From Date
+                      From Date &amp; Time
                     </label>
                     <input
-                      type="date"
+                      type="datetime-local"
                       value={reportStartDate}
                       onChange={(e) => {
                         setReportStartDate(e.target.value);
@@ -1009,10 +1022,10 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      To Date
+                      To Date &amp; Time
                     </label>
                     <input
-                      type="date"
+                      type="datetime-local"
                       value={reportEndDate}
                       onChange={(e) => {
                         setReportEndDate(e.target.value);
@@ -1080,7 +1093,7 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
                       </div>
                     </div>
                     <p className="text-sm text-white/60 mt-4 text-center">
-                      {reportStartDate} → {reportEndDate}
+                      {formatDateTime(reportStartDate)} → {formatDateTime(reportEndDate)}
                     </p>
                   </div>
 
