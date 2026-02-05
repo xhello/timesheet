@@ -8,16 +8,15 @@ let warmupComplete = false;
 let warmupRunning: Promise<void> | null = null;
 
 // Match threshold - lower = stricter matching (less false positives)
-// Increased to 0.55 for easier detection of existing faces
-const MATCH_THRESHOLD = 0.55;
+const MATCH_THRESHOLD = 0.48;
 
 // Minimum consecutive matches required before confirming identity
-const REQUIRED_CONSECUTIVE_MATCHES = 1;
+const REQUIRED_CONSECUTIVE_MATCHES = 2;
 
-// Minimum face quality requirements - relaxed for faster detection
-const MIN_FACE_AREA = 10000; // pixels squared (was 15000)
-const MIN_DETECTION_CONFIDENCE = 0.5; // was 0.7
-const MIN_LIVENESS_SCORE = 0.4; // was 0.6
+// Minimum face quality requirements
+const MIN_FACE_AREA = 12000; // pixels squared
+const MIN_DETECTION_CONFIDENCE = 0.6;
+const MIN_LIVENESS_SCORE = 0.5;
 
 // Check if models are already loaded
 export function areModelsLoaded(): boolean {
@@ -201,7 +200,7 @@ export async function detectFace(video: HTMLVideoElement): Promise<FaceDetection
   const detection = await faceapi
     .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({
       inputSize: 320,  // Reduced from 416 for faster detection
-      scoreThreshold: 0.4  // Reduced from 0.5 for faster face finding
+      scoreThreshold: 0.5
     }))
     .withFaceLandmarks()
     .withFaceDescriptor();
