@@ -22,6 +22,7 @@ import {
 import {
   formatInTimezone,
   formatDateInTimezone,
+  formatTimeWithSecondsInTimezone,
   toDateTimeLocalInTimezone,
   dateTimeLocalToUTC,
 } from '@/lib/timezone';
@@ -622,6 +623,14 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
 
   const displayRequests = activeTab === 'pending' ? pendingRequests : allRequests;
 
+  // Live clock in business timezone (top right)
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+  useEffect(() => {
+    const tick = () => setCurrentTime(new Date());
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header */}
@@ -641,6 +650,13 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
               <p className="text-slate-400">Admin Dashboard</p>
             </div>
             <div className="flex items-center gap-3">
+              {/* Business time (live clock) */}
+              <div className="text-right py-1 px-3 bg-white/10 rounded-lg">
+                <p className="text-[10px] uppercase tracking-wider text-white/70">Business time</p>
+                <p className="text-lg font-semibold tabular-nums leading-tight">
+                  {formatTimeWithSecondsInTimezone(currentTime, businessTz)}
+                </p>
+              </div>
               <button
                 onClick={openAddHoursModal}
                 className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-2"

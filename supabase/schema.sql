@@ -184,13 +184,14 @@ CREATE TRIGGER update_time_entries_updated_at
 -- ============================================
 
 -- View: Daily hours summary per employee
+-- work_date is the calendar date in the business's timezone (so "day worked" matches what the app shows)
 CREATE OR REPLACE VIEW daily_hours_summary AS
 SELECT 
     b.name AS business_name,
     b.business_code,
     e.id AS employee_id,
     e.full_name,
-    DATE(te.clock_in_time AT TIME ZONE 'UTC') AS work_date,
+    DATE(te.clock_in_time AT TIME ZONE COALESCE(b.timezone, 'UTC')) AS work_date,
     COUNT(*) AS entries_count,
     SUM(
         CASE 
@@ -205,7 +206,7 @@ FROM businesses b
 JOIN employees e ON e.business_id = b.id
 LEFT JOIN time_entries te ON e.id = te.employee_id
 WHERE te.clock_in_time IS NOT NULL
-GROUP BY b.name, b.business_code, e.id, e.full_name, DATE(te.clock_in_time AT TIME ZONE 'UTC')
+GROUP BY b.name, b.business_code, e.id, e.full_name, DATE(te.clock_in_time AT TIME ZONE COALESCE(b.timezone, 'UTC'))
 ORDER BY work_date DESC, b.name, e.full_name;
 
 -- View: Active employees (currently clocked in)

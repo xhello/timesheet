@@ -16,6 +16,7 @@ import {
 import {
   formatDateInTimezone,
   formatTimeInTimezone,
+  formatTimeWithSecondsInTimezone,
   toDateTimeLocalInTimezone,
   dateTimeLocalToUTC,
 } from '@/lib/timezone';
@@ -573,6 +574,14 @@ function EmployeeDashboard({
 
   const businessTz = business?.timezone ?? 'UTC';
 
+  // Live clock in business timezone (top right)
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+  useEffect(() => {
+    const tick = () => setCurrentTime(new Date());
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const openEditModal = (entry: TimeEntry) => {
     setEditingEntry(entry);
     // Show times in business (clock-in location) timezone
@@ -781,6 +790,13 @@ function EmployeeDashboard({
               <p className="text-white/80">{business?.name || 'Employee'}</p>
             </div>
             <div className="flex items-center gap-3">
+              {/* Business time (live clock) */}
+              <div className="text-right py-1 px-3 bg-white/10 rounded-lg">
+                <p className="text-[10px] uppercase tracking-wider text-white/70">Business time</p>
+                <p className="text-lg font-semibold tabular-nums leading-tight">
+                  {formatTimeWithSecondsInTimezone(currentTime, businessTz)}
+                </p>
+              </div>
               {/* Notification Bell */}
               <div className="relative">
                 <button

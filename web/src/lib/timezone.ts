@@ -54,6 +54,22 @@ export function formatTimeInTimezone(
 }
 
 /**
+ * Time with seconds (e.g. "2:30:45 PM") in business timezone — for live clock display.
+ */
+export function formatTimeWithSecondsInTimezone(
+  dateOrIso: Date | string,
+  timeZone: string = DEFAULT_TZ
+): string {
+  const date = typeof dateOrIso === 'string' ? new Date(dateOrIso) : dateOrIso;
+  return date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone,
+  });
+}
+
+/**
  * Get date/time parts in a timezone (for building datetime-local or computing offset).
  */
 function getPartsInTimezone(date: Date, timeZone: string): { year: number; month: number; day: number; hour: number; minute: number } {
