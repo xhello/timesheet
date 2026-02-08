@@ -19,6 +19,12 @@ import {
   createTimeEntry,
   createTimeChangeRequest,
 } from '@/lib/supabase';
+import {
+  formatInTimezone,
+  formatDateInTimezone,
+  toDateTimeLocalInTimezone,
+  dateTimeLocalToUTC,
+} from '@/lib/timezone';
 
 type View = 'login' | 'dashboard';
 
@@ -509,11 +515,11 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     }
   };
 
-  // Open add hours modal
+  // Open add hours modal; default to today in business timezone (9:00–17:00)
   const openAddHoursModal = () => {
     loadEmployeesList();
     const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
+    const dateStr = toDateTimeLocalInTimezone(now.toISOString(), business.timezone ?? 'UTC').slice(0, 10);
     setAddHoursClockIn(`${dateStr}T09:00`);
     setAddHoursClockOut(`${dateStr}T17:00`);
     setAddHoursEmployeeId('');
@@ -532,14 +538,14 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     setAddHoursSuccess(false);
   };
 
-  // Submit add hours (admin directly adds)
+  // Submit add hours (admin directly adds); interpret times in business timezone
   const handleAdminAddHours = async () => {
     if (!addHoursEmployeeId || !addHoursClockIn || !addHoursClockOut) return;
 
     setAddHoursSubmitting(true);
     try {
-      const clockInTime = new Date(addHoursClockIn).toISOString();
-      const clockOutTime = new Date(addHoursClockOut).toISOString();
+      const clockInTime = dateTimeLocalToUTC(addHoursClockIn, business.timezone ?? 'UTC');
+      const clockOutTime = dateTimeLocalToUTC(addHoursClockOut, business.timezone ?? 'UTC');
 
       // Create the time entry directly
       await createTimeEntry({
@@ -595,8 +601,10 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
     }
   };
 
+  const businessTz = business.timezone ?? 'UTC';
+
   const formatDateTime = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString('en-US', {
+    return formatInTimezone(dateStr, businessTz, {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
@@ -605,7 +613,7 @@ function AdminDashboard({ business, onLogout }: { business: Business; onLogout: 
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
+    return formatDateInTimezone(dateStr, businessTz, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',

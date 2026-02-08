@@ -14,6 +14,12 @@ import {
   getTimeChangeRequestsByEmployee,
 } from '@/lib/supabase';
 import {
+  formatDateInTimezone,
+  formatTimeInTimezone,
+  toDateTimeLocalInTimezone,
+  dateTimeLocalToUTC,
+} from '@/lib/timezone';
+import {
   loadFaceModels,
   detectFace,
   findMatchingEmployee,
@@ -565,14 +571,14 @@ function EmployeeDashboard({
   const [addSubmitting, setAddSubmitting] = useState(false);
   const [addSuccess, setAddSuccess] = useState(false);
 
+  const businessTz = business?.timezone ?? 'UTC';
+
   const openEditModal = (entry: TimeEntry) => {
     setEditingEntry(entry);
-    // Format datetime for input
-    const clockInDate = new Date(entry.clock_in_time);
-    setEditClockIn(clockInDate.toISOString().slice(0, 16));
+    // Show times in business (clock-in location) timezone
+    setEditClockIn(toDateTimeLocalInTimezone(entry.clock_in_time, businessTz));
     if (entry.clock_out_time) {
-      const clockOutDate = new Date(entry.clock_out_time);
-      setEditClockOut(clockOutDate.toISOString().slice(0, 16));
+      setEditClockOut(toDateTimeLocalInTimezone(entry.clock_out_time, businessTz));
     } else {
       setEditClockOut('');
     }
@@ -599,8 +605,8 @@ function EmployeeDashboard({
         business_id: business.id,
         original_clock_in: editingEntry.clock_in_time,
         original_clock_out: editingEntry.clock_out_time,
-        requested_clock_in: new Date(editClockIn).toISOString(),
-        requested_clock_out: editClockOut ? new Date(editClockOut).toISOString() : null,
+        requested_clock_in: dateTimeLocalToUTC(editClockIn, businessTz),
+        requested_clock_out: editClockOut ? dateTimeLocalToUTC(editClockOut, businessTz) : null,
         reason: editReason.trim(),
         status: 'pending',
       });
@@ -617,9 +623,9 @@ function EmployeeDashboard({
   };
 
   const openAddHoursModal = () => {
-    // Default to today's date with current time
+    // Default to today in business timezone (9:00–17:00)
     const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
+    const dateStr = toDateTimeLocalInTimezone(now.toISOString(), businessTz).slice(0, 10);
     setAddClockIn(`${dateStr}T09:00`);
     setAddClockOut(`${dateStr}T17:00`);
     setAddReason('');
@@ -646,8 +652,8 @@ function EmployeeDashboard({
         business_id: business.id,
         original_clock_in: null, // null for add requests
         original_clock_out: null,
-        requested_clock_in: new Date(addClockIn).toISOString(),
-        requested_clock_out: new Date(addClockOut).toISOString(),
+        requested_clock_in: dateTimeLocalToUTC(addClockIn, businessTz),
+        requested_clock_out: dateTimeLocalToUTC(addClockOut, businessTz),
         reason: addReason.trim(),
         status: 'pending',
         request_type: 'add',
@@ -747,18 +753,11 @@ function EmployeeDashboard({
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    });
+    return formatDateInTimezone(dateStr, businessTz);
   };
 
   const formatTime = (dateStr: string) => {
-    return new Date(dateStr).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return formatTimeInTimezone(dateStr, businessTz);
   };
 
   const calculateDuration = (clockIn: string, clockOut: string | null) => {
@@ -815,10 +814,7 @@ function EmployeeDashboard({
                             <div key={request.id} className="p-4 hover:bg-gray-50">
                               <div className="flex items-start justify-between mb-1">
                                 <p className="text-sm font-medium text-gray-900">
-                                  {new Date(request.requested_clock_in).toLocaleDateString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                  })}
+                                  {formatDateInTimezone(request.requested_clock_in, businessTz, { month: 'short', day: 'numeric' })}
                                 </p>
                                 <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
                                   request.status === 'pending'
@@ -831,12 +827,12 @@ function EmployeeDashboard({
                                 </span>
                               </div>
                               <p className="text-xs text-gray-500 mb-1">
-                                {new Date(request.requested_clock_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} - {request.requested_clock_out ? new Date(request.requested_clock_out).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                                {formatTimeInTimezone(request.requested_clock_in, businessTz)} - {request.requested_clock_out ? formatTimeInTimezone(request.requested_clock_out, businessTz) : 'N/A'}
                               </p>
                               <p className="text-xs text-gray-400 line-clamp-1">{request.reason}</p>
                               {request.reviewed_at && (
                                 <p className="text-xs text-gray-400 mt-1">
-                                  Reviewed {new Date(request.reviewed_at).toLocaleDateString()}
+                                  Reviewed {formatDateInTimezone(request.reviewed_at, businessTz, { dateStyle: 'short' })}
                                 </p>
                               )}
                             </div>

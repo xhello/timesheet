@@ -87,13 +87,17 @@ export default function BusinessSignUp({ onBack, onSuccess }: Props) {
       // Hash password
       const passwordHash = await hashPassword(password);
 
-      // Create business in Supabase with location and password
+      // Set timezone from browser at signup (clock-in location) so logged times display correctly
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+      // Create business in Supabase with location, timezone, and password
       await createBusiness({
         business_code: code,
         name: businessName.trim(),
         email: email.toLowerCase().trim(),
         latitude: location.latitude,
         longitude: location.longitude,
+        timezone,
         password_hash: passwordHash,
       });
 
