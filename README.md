@@ -8,7 +8,8 @@ The replacement is merged into `main` in the [GitHub Timesheet repository](https
 
 - Sunday–Saturday Front Desk schedule, including overnight and hotel-cleaning shifts.
 - Employee shift preferences, custom admin priority, and optional hire-date seniority sorting.
-- Automatic assignment plus manual assignment and drag/move controls.
+- Live priority-based assignments when employees request shifts, with ranked requester lists visible to the team.
+- Manual assignment and drag/move controls that take precedence over automatic requests.
 - Configurable daily/weekly limits, defaulting to 8 and 40 hours, with explicit admin overrides.
 - Verified email/password sign-in for the admin; employees sign in using their registered phone number alone.
 - Admin-managed employee phone numbers and a copyable employee login link. No employee email, password, SMS verification, or invite code.
@@ -97,6 +98,14 @@ The admin creates and verifies the account matching `ADMIN_EMAIL`, signs in thro
 Use one unique phone number per active employee. US/Canada 10-digit numbers are normalized to +1; other numbers require an explicit +country code. Leaving a number blank disables employee login. Changing or clearing it invalidates existing sessions; ordinary name or hire-date edits preserve them. Employee sessions last up to seven days and cannot access admin controls or other employees' phone numbers.
 
 Phone-only access is intentional: anyone who knows a registered number can sign in as that employee. Signed HttpOnly cookies and shared rate limits protect session integrity and limit guessing; they do not verify ownership of the number. Review roster details, priority, hire dates, and imported shifts before sharing the login link.
+
+## Shift requests and priority
+
+Save a complete order under **Team & priority** before automatic request assignment begins. For each open draft shift, the highest-priority eligible requester is provisionally assigned immediately. A later request from a higher-priority employee can replace that provisional assignment; withdrawal promotes the next eligible requester. Priority changes and work-hour setting changes also recalculate draft request assignments. Overlapping shifts and daily/weekly hour limits remain enforced automatically. Requests that cannot be assigned stay in the queue.
+
+Employees see everyone requesting a shift in priority order, including provisional assignments before publication. Each employee's request notes remain visible only to that employee and the admin. Phone numbers and hire dates remain admin-only. The schedule refreshes periodically while users are not editing.
+
+Imported assignments, manual assignments, and published weeks are preserved. Explicitly clearing or moving an assignment holds the vacated shift open; **Auto-assign** includes those open shifts again. Publishing freezes the week's results; reopen it to collect and recalculate requests.
 
 Hours use calendar days and Sunday–Saturday weeks. Overnight hours split at midnight; compatible overlapping duties count once. Auto-assignment fills requested open shifts and skips conflicts or hour-limit overages. Admins can explicitly override hour limits. Publishing closes requests; later schedule edits reopen affected weeks as drafts.
 

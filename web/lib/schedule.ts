@@ -1,5 +1,5 @@
 export type Employee = { id: string; name: string; hireDate: string; priority: number; phone?: string; phoneVersion?: string; userId?: string; codeHash?: string; codeExpires?: number; active: boolean };
-export type Shift = { id: string; date: string; start: string; end: string; label: string; employeeId: string | null; source: string; note?: string; hourLimitOverride?: boolean };
+export type Shift = { id: string; date: string; start: string; end: string; label: string; employeeId: string | null; source: string; note?: string; hourLimitOverride?: boolean; requestAssignmentLocked?: boolean };
 export type ShiftRequest = { id: string; shiftId: string; employeeId: string; createdAt: string; note: string };
 export type WorkHourSettings = { dailyMaxHours: number; weeklyMaxHours: number };
 export type HourLimitIssue = { employeeId: string; kind: 'day'|'week'; period: string; hours: number; limit: number };
@@ -57,6 +57,54 @@ export function weekHourIssues(state:Pick<State,'shifts'|'settings'|'employees'>
 }
 export function formatHours(hours:number) {return Number(hours.toFixed(2)).toString();}
 export function hourIssueText(issue:HourLimitIssue) {return `${formatHours(issue.hours)} hours ${issue.kind==='day'?'on':'in the week of'} ${issue.period} (limit ${formatHours(issue.limit)})`;}
+
+/** Return a sorted copy; the saved request order and private request notes stay intact. */
+export function rankedRequests(state: Pick<State, 'employees'|'requests'>, shiftId?: string): ShiftRequest[] {
+  const employees = new Map(state.employees.filter(employee=>employee.active).map(employee=>[employee.id,employee]));
+  const priority = (employeeId:string) => {
+    const value = employees.get(employeeId)?.priority;
+    return typeof value==='number'&&Number.isSafeInteger(value)&&value>0 ? value : Number.POSITIVE_INFINITY;
+  };
+  return state.requests.filter(request=>employees.has(request.employeeId)&&(shiftId===undefined||request.shiftId===shiftId)).sort((a,b)=>{
+    const left=priority(a.employeeId),right=priority(b.employeeId);
+    return (left===right?0:left<right?-1:1)||a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id);
+  });
+}
+
+/** Rebuild live draft assignments together so released hours can serve other requests. */
+export function reconcileRequestAssignments(state: State): number {
+  const active=state.employees.filter(employee=>employee.active);
+  if(!state.priorityConfirmed||!active.length||active.some(employee=>!Number.isSafeInteger(employee.priority)||employee.priority<=0)||new Set(active.map(employee=>employee.priority)).size!==active.length) return 0;
+
+  const candidates=state.shifts.filter(shift=>state.weeks[weekOf(shift.date)]!=='published'&&!shift.requestAssignmentLocked&&(!shift.employeeId||shift.source==='request-priority'))
+    .sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start)||a.id.localeCompare(b.id));
+  const before=new Map(candidates.map(shift=>[shift.id,{employeeId:shift.employeeId,source:shift.source,hourLimitOverride:shift.hourLimitOverride}]));
+  const requestsByShift=new Map<string,ShiftRequest[]>();
+  for(const request of rankedRequests(state)) {
+    const requests=requestsByShift.get(request.shiftId)??[];
+    requests.push(request);requestsByShift.set(request.shiftId,requests);
+  }
+
+  // Clear only assignments owned by this feature. Published, manual, imported,
+  // legacy batch assignments, and explicitly locked slots remain constraints.
+  for(const shift of candidates) if(shift.source==='request-priority') {
+    shift.employeeId=null;
+    shift.hourLimitOverride=false;
+  }
+  for(const shift of candidates) {
+    const winner=requestsByShift.get(shift.id)?.find(request=>!conflict(state,shift,request.employeeId)&&assignmentHourIssues(state,shift,request.employeeId).length===0);
+    if(winner) {
+      shift.employeeId=winner.employeeId;
+      shift.source='request-priority';
+      shift.hourLimitOverride=false;
+    }
+  }
+  return candidates.filter(shift=>{
+    const previous=before.get(shift.id)!;
+    return shift.employeeId!==previous.employeeId||shift.source!==previous.source||shift.hourLimitOverride!==previous.hourLimitOverride;
+  }).length;
+}
+
 export function fillByPriority(state: State, week: string) {
   let assigned=0;
   const shifts=state.shifts.filter(s=>weekOf(s.date)===week).sort((a,b)=>(a.date+a.start+a.id).localeCompare(b.date+b.start+b.id));

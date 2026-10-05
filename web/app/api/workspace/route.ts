@@ -2,7 +2,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { normalizePhone } from '@/lib/phone';
 import { isSameOriginRequest } from '@/app/auth/origin';
 import { createState, readState, commitState } from '@/lib/storage';
-import { State, Shift, INITIAL_WEEK, weekOf, addDays, conflict, fillByPriority, workHourSettings, assignmentHourIssues, weekHourIssues, hourIssueText } from '@/lib/schedule';
+import { State, Shift, INITIAL_WEEK, weekOf, addDays, conflict, rankedRequests, reconcileRequestAssignments, workHourSettings, assignmentHourIssues, weekHourIssues, hourIssueText } from '@/lib/schedule';
 import imported from '@/lib/imported.json';
 import { z } from 'zod';
 export const dynamic='force-dynamic';
@@ -38,9 +38,9 @@ function view(state:State|null,version:number,user:CurrentUser) {
  const admin=canSetUpWorkspace(user)&&state.ownerId===user.userId; const employee=user.authType==='phone'?state.employees.find(e=>e.id===user.employeeId&&e.phone&&e.phoneVersion===user.phoneVersion&&e.active):undefined;
  if(!admin&&!employee) return {role:'guest',version,userName:user.displayName};
  return {role:admin?'admin':'employee',userName:user.displayName,employeeId:employee?.id,version,priorityConfirmed:state.priorityConfirmed,notes:admin?state.notes:[],weeks:state.weeks,settings:workHourSettings(state),
-  employees:state.employees.map(e=>({id:e.id,name:e.name,active:e.active,hireDate:admin?e.hireDate:'',priority:admin?e.priority:0,phone:admin?(e.phone??''):undefined,connected:admin?!!e.phone:undefined})),
-  shifts:state.shifts.map(s=>admin||state.weeks[weekOf(s.date)]==='published'?s:{...s,employeeId:null,source:'draft',note:undefined}),
-  requests:admin?state.requests:state.requests.filter(r=>r.employeeId===employee!.id)};
+  employees:state.employees.map(e=>({id:e.id,name:e.name,active:e.active,hireDate:admin?e.hireDate:'',priority:e.priority,phone:admin?(e.phone??''):undefined,connected:admin?!!e.phone:undefined})),
+  shifts:state.shifts.map(s=>admin?s:state.weeks[weekOf(s.date)]==='published'||s.source==='request-priority'?{...s,note:undefined}:{...s,employeeId:null,source:'draft',note:undefined,hourLimitOverride:undefined}),
+  requests:rankedRequests(state).filter(r=>state.shifts.some(s=>s.id===r.shiftId)).map(r=>({id:r.id,shiftId:r.shiftId,employeeId:r.employeeId,createdAt:r.createdAt,note:admin||r.employeeId===employee!.id?r.note:''}))};
 }
 export async function GET(){try{const user=await getCurrentUser();if(!user)return json({error:'Sign in to access the schedule.'},401);if(user.authType==='email'&&!user.emailVerified)return json({error:'Verify your email before accessing the schedule.'},403);const saved=await readState();return json(view(saved?.state??null,saved?.version??0,user));}catch(e){console.error('Schedule read failed',e);return json({error:'Your schedule could not load. Please try again.'},503);}}
 export async function POST(req:Request){try{
@@ -89,19 +89,19 @@ export async function POST(req:Request){try{
   const ids=state.employees.filter(e=>e.active).map(e=>e.id);if(new Set(a.ids).size!==ids.length||a.ids.length!==ids.length||ids.some(id=>!a.ids.includes(id)))fail('Include every active employee once.');
   a.ids.forEach((id,i)=>getEmployee(id).priority=i+1);state.priorityConfirmed=true;message='Priority order saved.';break;
  }
- case 'settings':{state.settings={dailyMaxHours:a.dailyMaxHours,weeklyMaxHours:a.weeklyMaxHours};message='Work-hour limits saved. Existing assignments are unchanged; review any overages.';break;}
+ case 'settings':{state.settings={dailyMaxHours:a.dailyMaxHours,weeklyMaxHours:a.weeklyMaxHours};message='Work-hour limits saved. Automatic requests were reviewed; manual and published assignments are unchanged.';break;}
  case 'assign':{
   const s=getShift(a.shiftId);if(a.employeeId){getEmployee(a.employeeId);if(conflict(state,s,a.employeeId)&&!a.allowOverlap)fail('This employee has an overlapping shift. Confirm the overlap if both duties can be worked.',422);}
   const issues=a.employeeId?assignmentHourIssues(state,s,a.employeeId):[];
   if(issues.length&&!a.overrideHourLimits)fail('Work-hour limit exceeded: '+issues.map(hourIssueText).join('; ')+'. An admin can explicitly override these limits.',422);
-  s.employeeId=a.employeeId;s.source='manual';s.hourLimitOverride=issues.length>0&&a.overrideHourLimits===true;markDraft(s);message='Assignment updated.';break;
+  s.employeeId=a.employeeId;s.source='manual';s.requestAssignmentLocked=!a.employeeId;s.hourLimitOverride=issues.length>0&&a.overrideHourLimits===true;markDraft(s);message=a.employeeId?'Assignment updated.':'Shift held open. Use Auto-assign to include it in automatic requests again.';break;
  }
  case 'move':{
   const from=getShift(a.fromId),to=getShift(a.toId);if(from.id===to.id)fail('Choose another shift.');if(!from.employeeId)fail('The source shift is empty.');if(to.employeeId)fail('Move to an open shift, or edit the target assignment directly.');
   if(conflict(state,to,from.employeeId,from.id)&&!a.allowOverlap)fail('Moving would create overlapping shifts. Edit the target to confirm compatible duties.',422);
   const issues=assignmentHourIssues(state,to,from.employeeId,from.id);
   if(issues.length&&!a.overrideHourLimits)fail('Moving exceeds a work-hour limit: '+issues.map(hourIssueText).join('; ')+'. Open the shift editor to approve an admin override.',422);
-  to.employeeId=from.employeeId;to.source='manual';to.hourLimitOverride=issues.length>0&&a.overrideHourLimits===true;from.employeeId=null;from.source='manual';from.hourLimitOverride=false;markDraft(from);markDraft(to);message='Assignment moved.';break;
+  to.employeeId=from.employeeId;to.source='manual';to.requestAssignmentLocked=false;to.hourLimitOverride=issues.length>0&&a.overrideHourLimits===true;from.employeeId=null;from.source='manual';from.requestAssignmentLocked=true;from.hourLimitOverride=false;markDraft(from);markDraft(to);message='Assignment moved.';break;
  }
  case 'shift':{
   if(a.start===a.end)fail('Start and end times must differ.');
@@ -116,9 +116,14 @@ export async function POST(req:Request){try{
   if(existing)existing.note=a.note;else state.requests.push({id:crypto.randomUUID(),shiftId:s.id,employeeId,createdAt:new Date().toISOString(),note:a.note});message='Shift request saved.';break;
  }
  case 'withdraw':{const r=state.requests.find(r=>r.id===a.requestId);if(!r)fail('Request not found.',404);if(!admin&&r.employeeId!==me!.id)fail('This is not your request.',403);if(state.weeks[weekOf(getShift(r.shiftId).date)]==='published')fail('Published requests cannot be withdrawn.');state.requests=state.requests.filter(x=>x.id!==r.id);message='Request withdrawn.';break;}
- case 'auto':{if(!state.priorityConfirmed)fail('Set and save the priority order first.');const count=fillByPriority(state,a.week);state.weeks[a.week]='draft';message=`${count} open shift${count===1?'':'s'} assigned from requests. Existing assignments were preserved. Daily and weekly hour limits were respected.`;break;}
+ case 'auto':{if(!state.priorityConfirmed)fail('Set and save the priority order first.');if(state.weeks[a.week]==='published')fail('Reopen this week before updating automatic assignments.');for(const s of state.shifts)if(weekOf(s.date)===a.week&&!s.employeeId)s.requestAssignmentLocked=false;state.weeks[a.week]='draft';message='Request assignments refreshed by priority. Manual assignments and work-hour limits were respected.';break;}
  case 'week':{const w=weekOf(a.week);if(state.shifts.some(s=>weekOf(s.date)===w))fail('This week already has shifts.');const templates=[['Morning','07:30','13:00'],['Afternoon','13:00','17:00'],['Evening','17:00','22:00'],['Hotel cleaning','17:30','20:30'],['Overnight','22:00','06:00']];for(let i=0;i<7;i++)for(const [label,start,end] of templates)state.shifts.push({id:crypto.randomUUID(),date:addDays(w,i),label,start,end,employeeId:null,source:'template'});state.weeks[w]='draft';message='New week created with your five shift types.';break;}
- case 'publish':{if(!state.shifts.some(s=>weekOf(s.date)===a.week))fail('Create shifts before publishing.');if(a.published){const issues=weekHourIssues(state,a.week);if(issues.length&&!a.overrideHourLimits)fail('This schedule exceeds work-hour limits. Review the flagged employees and explicitly approve an admin override before publishing.',422);}state.weeks[a.week]=a.published?'published':'draft';message=a.published?'Schedule published to employees.':'Week reopened for requests and edits.';break;}
+ case 'publish':{if(!state.shifts.some(s=>weekOf(s.date)===a.week))fail('Create shifts before publishing.');if(a.published){reconcileRequestAssignments(state);const issues=weekHourIssues(state,a.week);if(issues.length&&!a.overrideHourLimits)fail('This schedule exceeds work-hour limits. Review the flagged employees and explicitly approve an admin override before publishing.',422);}state.weeks[a.week]=a.published?'published':'draft';message=a.published?'Schedule published to employees.':'Week reopened for requests and edits.';break;}
+ }
+ reconcileRequestAssignments(state);
+ if(a.action==='request'){
+  const s=getShift(a.shiftId),requester=admin?a.employeeId:me!.id;
+  message=!state.priorityConfirmed?'Request saved. Your admin needs to save the priority order.':s.source==='request-priority'&&s.employeeId===requester?'Request saved and provisionally assigned by priority.':'Request saved in the priority queue.';
  }
  const result=await commitState(state,version);if(!result.meta.changes)fail('Someone updated the schedule. Refresh and try again.',409);
  return json({...view(state,version+1,user),message});

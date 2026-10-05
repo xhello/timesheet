@@ -185,8 +185,10 @@ test('editing non-phone details preserves a valid session and omitting phone pre
   assert.equal(app.snapshot().state.employees[0].phoneVersion, employee.phoneVersion);
 });
 
-test('phone employee requests are bound to their profile and other employees requests remain private', async () => {
+test('employees see ranked requesters but only their own notes and can only change their own requests', async () => {
   const state = initial();
+  state.priorityConfirmed = true;
+  state.employees.push({ id: 'other-employee', name: 'Other employee', active: true, hireDate: '2020-01-01', priority: 2, phone: '+16045550999', phoneVersion: 'private-version' });
   state.shifts = [{ id: 'shift', date: '2026-10-11', start: '08:00', end: '16:00', label: 'Desk', employeeId: null, source: 'manual' }];
   state.weeks = { '2026-10-11': 'draft' };
   state.requests = [{ id: 'someone-else', shiftId: 'shift', employeeId: 'other-employee', note: 'Private', createdAt: '2026-10-01' }];
@@ -195,8 +197,106 @@ test('phone employee requests are bound to their profile and other employees req
   const response = await app.POST(request({ action: 'request', shiftId: 'shift', employeeId: 'other-employee', note: 'My preference', version: 0 }));
   assert.equal(response.status, 200);
   const data = await response.json();
-  assert.equal(data.requests.length, 1);
+  assert.equal(data.requests.length, 2);
   assert.equal(data.requests[0].employeeId, employee.employeeId);
+  assert.equal(data.requests[0].note, 'My preference');
+  assert.equal(data.requests[1].note, '');
+  assert.deepEqual(data.employees.map(e => e.priority), [1, 2]);
+  assert.ok(data.employees.every(e => !e.phone && !e.phoneVersion && !e.hireDate));
+  assert.equal(data.shifts[0].employeeId, employee.employeeId);
+  assert.equal(data.shifts[0].source, 'request-priority');
   assert.equal(app.snapshot().state.requests.length, 2);
   assert.equal((await app.POST(request({ action: 'withdraw', requestId: data.requests[0].id, version: 1 }))).status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, 'other-employee');
+});
+
+function competingState() {
+  const state = initial();
+  state.priorityConfirmed = true;
+  state.employees.push({ id: 'junior', name: 'Junior', active: true, hireDate: '', priority: 2 });
+  state.shifts = [{ id: 'shift', date: '2026-10-11', start: '08:00', end: '12:00', label: 'Desk', employeeId: 'junior', source: 'request-priority' }];
+  state.weeks = { '2026-10-11': 'draft' };
+  state.requests = [{ id: 'junior-request', shiftId: 'shift', employeeId: 'junior', createdAt: '2026-10-01', note: 'Private junior note' }];
+  return state;
+}
+
+test('a later senior request replaces a provisional winner in the same version-checked write', async () => {
+  const state = competingState();
+  const action = { action: 'request', shiftId: 'shift', note: '', version: 5 };
+  const raced = harness({ user: employee, saved: { state, version: 5 }, conflict: true });
+  assert.equal((await raced.POST(request(action))).status, 409);
+  assert.equal(raced.snapshot().state.shifts[0].employeeId, 'junior');
+  assert.equal(raced.snapshot().state.requests.length, 1);
+  const app = harness({ user: employee, saved: { state, version: 5 } });
+  const response = await app.POST(request(action));
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.shifts[0].employeeId, employee.employeeId);
+  assert.deepEqual(data.requests.map(r => r.employeeId), [employee.employeeId, 'junior']);
+  assert.equal(app.snapshot().version, 6);
+  assert.equal(app.writes(), 1);
+});
+
+test('unsaved priority collects requests and saving priority allocates them immediately', async () => {
+  const state = competingState();
+  state.priorityConfirmed = false;
+  state.employees.forEach(e => e.priority = 0);
+  state.shifts[0].employeeId = null;
+  state.shifts[0].source = 'manual';
+  const app = harness({ saved: { state, version: 0 } });
+  let response = await app.POST(request({ action: 'request', employeeId: employee.employeeId, shiftId: 'shift', note: '', version: 0 }));
+  assert.equal(response.status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, null);
+  response = await app.POST(request({ action: 'priority', ids: [employee.employeeId, 'junior'], version: 1 }));
+  assert.equal(response.status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, employee.employeeId);
+  response = await app.POST(request({ action: 'priority', ids: ['junior', employee.employeeId], version: 2 }));
+  assert.equal(response.status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, 'junior');
+});
+
+test('manual assignment and an explicitly held open shift are preserved until admin resumes automatic filling', async () => {
+  const state = competingState();
+  const app = harness({ saved: { state, version: 0 } });
+  assert.equal((await app.POST(request({ action: 'assign', shiftId: 'shift', employeeId: 'junior', version: 0 }))).status, 200);
+  assert.equal((await app.POST(request({ action: 'request', shiftId: 'shift', employeeId: employee.employeeId, note: '', version: 1 }))).status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, 'junior');
+  assert.equal(app.snapshot().state.shifts[0].source, 'manual');
+  assert.equal((await app.POST(request({ action: 'assign', shiftId: 'shift', employeeId: null, version: 2 }))).status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, null);
+  assert.equal(app.snapshot().state.shifts[0].requestAssignmentLocked, true);
+  assert.equal((await app.POST(request({ action: 'request', shiftId: 'shift', employeeId: employee.employeeId, note: 'Updated note', version: 3 }))).status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, null);
+  assert.equal((await app.POST(request({ action: 'auto', week: '2026-10-11', version: 4 }))).status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, employee.employeeId);
+  assert.equal(app.snapshot().state.shifts[0].requestAssignmentLocked, false);
+});
+
+test('hour-limit changes re-evaluate automatic requests without changing fixed assignments', async () => {
+  const state = competingState();
+  state.shifts[0].start = '12:00'; state.shifts[0].end = '16:00';
+  state.shifts[0].employeeId = employee.employeeId;
+  state.shifts.push({ id: 'fixed', date: '2026-10-11', start: '08:00', end: '12:00', label: 'Fixed duty', employeeId: employee.employeeId, source: 'manual', note: 'Admin-only note' });
+  state.requests.push({ id: 'senior-request', shiftId: 'shift', employeeId: employee.employeeId, createdAt: '2026-10-02', note: '' });
+  const app = harness({ saved: { state, version: 0 } });
+  assert.equal((await app.POST(request({ action: 'settings', dailyMaxHours: 6, weeklyMaxHours: 40, version: 0 }))).status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, 'junior');
+  assert.equal(app.snapshot().state.shifts[1].employeeId, employee.employeeId);
+  const member = harness({ user: employee, saved: app.snapshot() });
+  const data = await (await member.GET()).json();
+  assert.equal(data.shifts[0].employeeId, 'junior');
+  assert.equal(data.shifts[1].employeeId, null);
+  assert.equal(data.shifts[1].note, undefined);
+});
+
+test('publishing freezes provisional winners and blocks new requests, withdrawal, and automatic refill', async () => {
+  const state = competingState();
+  const app = harness({ saved: { state, version: 0 } });
+  assert.equal((await app.POST(request({ action: 'publish', week: '2026-10-11', published: true, version: 0 }))).status, 200);
+  assert.equal((await app.POST(request({ action: 'request', shiftId: 'shift', employeeId: employee.employeeId, note: '', version: 1 }))).status, 400);
+  assert.equal((await app.POST(request({ action: 'withdraw', requestId: 'junior-request', version: 1 }))).status, 400);
+  assert.equal((await app.POST(request({ action: 'auto', week: '2026-10-11', version: 1 }))).status, 400);
+  assert.equal((await app.POST(request({ action: 'priority', ids: ['junior', employee.employeeId], version: 1 }))).status, 200);
+  assert.equal(app.snapshot().state.shifts[0].employeeId, 'junior');
+  assert.equal(app.snapshot().state.weeks['2026-10-11'], 'published');
 });
