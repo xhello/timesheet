@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient, hasSupabaseConfiguration } from "@/lib/supabase/server";
 import { isSameOriginRequest, redirectOrigin } from "@/app/auth/origin";
+import { clearEmployeeSession } from "@/lib/employee-session";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  await clearEmployeeSession();
   let failed = false;
   if (hasSupabaseConfiguration()) {
     try {

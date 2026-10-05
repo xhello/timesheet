@@ -16,10 +16,11 @@ function load(relative, dependencies = {}, env = {}) {
   return module.exports;
 }
 const schedule = load('../lib/schedule.ts');
-const admin = { userId: 'admin-id', displayName: 'Admin', email: 'admin@example.test', emailVerified: true };
-const employee = { userId: 'employee-user', displayName: 'Employee', email: 'employee@example.test', emailVerified: true };
+const phone = load('../lib/phone.ts');
+const admin = { userId: 'admin-id', displayName: 'Admin', email: 'admin@example.test', emailVerified: true, authType: 'email' };
+const employee = { userId: 'employee:employee-id', employeeId: 'employee-id', phoneVersion: 'phone-version', displayName: 'Employee', email: '', emailVerified: false, authType: 'phone' };
 const seed = { employees: [{ id: 'employee-id', name: 'Employee', hireDate: '', priority: 1, active: true, userId: 'old-chatgpt-user', codeHash: 'old-code', codeExpires: 999 }], shifts: [], notes: [] };
-const initial = () => ({ ownerId: admin.userId, ownerName: admin.displayName, employees: [{ ...seed.employees[0], userId: employee.userId }], shifts: [], requests: [], weeks: {}, imported: true, priorityConfirmed: false, notes: [] });
+const initial = () => ({ ownerId: admin.userId, ownerName: admin.displayName, employees: [{ ...seed.employees[0], phone: '+16045550123', phoneVersion: employee.phoneVersion }], shifts: [], requests: [], weeks: {}, imported: true, priorityConfirmed: false, notes: [] });
 
 function harness({ user = admin, saved = null, env = { ADMIN_EMAIL: admin.email }, imported = seed, conflict = false } = {}) {
   let snapshot = structuredClone(saved);
@@ -29,6 +30,7 @@ function harness({ user = admin, saved = null, env = { ADMIN_EMAIL: admin.email 
     '@/lib/auth': { getCurrentUser: async () => user },
     '@/app/auth/origin': origin,
     '@/lib/schedule': schedule,
+    '@/lib/phone': phone,
     '@/lib/imported.json': imported,
     '@/lib/storage': {
       readState: async () => structuredClone(snapshot),
@@ -119,4 +121,82 @@ test('malformed JSON and non-object inputs receive a validation error', async ()
   assert.equal((await app.POST(new Request(invalid, { body: '{' }))).status, 400);
   assert.equal((await app.POST(request(null))).status, 400);
   assert.equal(app.writes(), 0);
+});
+
+test('phone employees can read without email verification but cannot see phone numbers', async () => {
+  const app = harness({ user: employee, saved: { state: initial(), version: 0 } });
+  const response = await app.GET();
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.role, 'employee');
+  assert.equal(data.employeeId, employee.employeeId);
+  assert.equal(data.employees[0].phone, undefined);
+  assert.equal(data.employees[0].phoneVersion, undefined);
+  assert.equal(data.employees[0].userId, undefined);
+});
+
+test('phone session cannot become admin even if its userId matches owner', async () => {
+  const app = harness({ user: { ...employee, userId: admin.userId }, saved: { state: initial(), version: 0 } });
+  assert.equal((await (await app.GET()).json()).role, 'employee');
+  assert.equal((await app.POST(request({ action: 'priority', ids: ['employee-id'], version: 0 }))).status, 403);
+});
+
+test('old employee email bindings and obsolete invite actions no longer grant access', async () => {
+  const state = initial();
+  state.employees[0].userId = 'legacy-user';
+  const app = harness({ user: { ...admin, userId: 'legacy-user', email: 'employee@example.test' }, saved: { state, version: 0 } });
+  assert.equal((await (await app.GET()).json()).role, 'guest');
+  for (const action of [{ action: 'join', code: 'old-code' }, { action: 'code', employeeId: 'employee-id' }]) {
+    assert.equal((await app.POST(request({ ...action, version: 0 }))).status, 400);
+  }
+  assert.equal(app.writes(), 0);
+});
+
+test('admin normalizes unique phone numbers and revokes sessions after changing or clearing them', async () => {
+  const state = initial();
+  state.employees.push({ id: 'second', name: 'Second', active: true, hireDate: '', priority: 2, phone: '+16045550999', phoneVersion: 'another-version' });
+  const app = harness({ saved: { state, version: 0 } });
+  const action = { action: 'employee', id: 'employee-id', name: 'Employee', hireDate: '' };
+  assert.equal((await app.POST(request({ ...action, phone: '(604) 555-0999', version: 0 }))).status, 409);
+  assert.equal((await app.POST(request({ ...action, phone: 'not a phone', version: 0 }))).status, 400);
+  assert.equal(app.writes(), 0);
+  const changed = await app.POST(request({ ...action, phone: '(604) 555-0124', version: 0 }));
+  assert.equal(changed.status, 200);
+  const saved = app.snapshot();
+  assert.equal(saved.state.employees[0].phone, '+16045550124');
+  assert.notEqual(saved.state.employees[0].phoneVersion, employee.phoneVersion);
+  assert.equal((await changed.json()).employees[0].phone, '+16045550124');
+  const revoked = harness({ user: employee, saved });
+  assert.equal((await (await revoked.GET()).json()).role, 'guest');
+  assert.equal((await revoked.POST(request({ action: 'request', shiftId: 'any', note: '', version: 1 }))).status, 403);
+  const version = saved.state.employees[0].phoneVersion;
+  assert.equal((await app.POST(request({ ...action, phone: '', version: 1 }))).status, 200);
+  assert.equal(app.snapshot().state.employees[0].phone, '');
+  assert.notEqual(app.snapshot().state.employees[0].phoneVersion, version);
+});
+
+test('editing non-phone details preserves a valid session and omitting phone preserves the existing number', async () => {
+  const app = harness({ saved: { state: initial(), version: 0 } });
+  const action = { action: 'employee', id: 'employee-id', name: 'Updated name', hireDate: '' };
+  assert.equal((await app.POST(request({ ...action, version: 0 }))).status, 200);
+  assert.equal(app.snapshot().state.employees[0].phone, '+16045550123');
+  assert.equal(app.snapshot().state.employees[0].phoneVersion, employee.phoneVersion);
+  assert.equal((await app.POST(request({ ...action, phone: '604-555-0123', version: 1 }))).status, 200);
+  assert.equal(app.snapshot().state.employees[0].phoneVersion, employee.phoneVersion);
+});
+
+test('phone employee requests are bound to their profile and other employees requests remain private', async () => {
+  const state = initial();
+  state.shifts = [{ id: 'shift', date: '2026-10-11', start: '08:00', end: '16:00', label: 'Desk', employeeId: null, source: 'manual' }];
+  state.weeks = { '2026-10-11': 'draft' };
+  state.requests = [{ id: 'someone-else', shiftId: 'shift', employeeId: 'other-employee', note: 'Private', createdAt: '2026-10-01' }];
+  const app = harness({ user: employee, saved: { state, version: 0 } });
+  assert.equal((await app.POST(request({ action: 'withdraw', requestId: 'someone-else', version: 0 }))).status, 403);
+  const response = await app.POST(request({ action: 'request', shiftId: 'shift', employeeId: 'other-employee', note: 'My preference', version: 0 }));
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.requests.length, 1);
+  assert.equal(data.requests[0].employeeId, employee.employeeId);
+  assert.equal(app.snapshot().state.requests.length, 2);
+  assert.equal((await app.POST(request({ action: 'withdraw', requestId: data.requests[0].id, version: 1 }))).status, 200);
 });

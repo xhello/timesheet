@@ -1,4 +1,4 @@
-export type Employee = { id: string; name: string; hireDate: string; priority: number; userId?: string; codeHash?: string; codeExpires?: number; active: boolean };
+export type Employee = { id: string; name: string; hireDate: string; priority: number; phone?: string; phoneVersion?: string; userId?: string; codeHash?: string; codeExpires?: number; active: boolean };
 export type Shift = { id: string; date: string; start: string; end: string; label: string; employeeId: string | null; source: string; note?: string; hourLimitOverride?: boolean };
 export type ShiftRequest = { id: string; shiftId: string; employeeId: string; createdAt: string; note: string };
 export type WorkHourSettings = { dailyMaxHours: number; weeklyMaxHours: number };

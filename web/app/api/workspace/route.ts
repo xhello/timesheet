@@ -1,4 +1,5 @@
 import { getCurrentUser } from '@/lib/auth';
+import { normalizePhone } from '@/lib/phone';
 import { isSameOriginRequest } from '@/app/auth/origin';
 import { createState, readState, commitState } from '@/lib/storage';
 import { State, Shift, INITIAL_WEEK, weekOf, addDays, conflict, fillByPriority, workHourSettings, assignmentHourIssues, weekHourIssues, hourIssueText } from '@/lib/schedule';
@@ -13,9 +14,7 @@ const time=z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 const txt=z.string().trim().min(1).max(80);
 const input=z.discriminatedUnion('action',[
  z.object({action:z.literal('setup')}),
- z.object({action:z.literal('join'),code:z.string().min(1).max(80)}),
- z.object({action:z.literal('employee'),id:z.string().optional(),name:txt,hireDate:z.union([date,z.literal('')])}),
- z.object({action:z.literal('code'),employeeId:txt}),
+ z.object({action:z.literal('employee'),id:z.string().optional(),name:txt,hireDate:z.union([date,z.literal('')]),phone:z.string().trim().max(50).optional()}),
  z.object({action:z.literal('priority'),ids:z.array(txt).max(200)}),
  z.object({action:z.literal('settings'),dailyMaxHours:z.number().min(0.25).max(24).multipleOf(0.25),weeklyMaxHours:z.number().min(0.25).max(168).multipleOf(0.25)}),
  z.object({action:z.literal('assign'),shiftId:txt,employeeId:z.string().nullable(),allowOverlap:z.boolean().optional(),overrideHourLimits:z.boolean().optional()}),
@@ -30,25 +29,24 @@ const input=z.discriminatedUnion('action',[
 ]);
 function fail(message:string,status=400):never { throw Object.assign(new Error(message),{status}); }
 const json=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
-async function hash(code:string) { const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code.replace(/[^a-z0-9]/gi,'').toUpperCase()));return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join(''); }
 function canSetUpWorkspace(user:CurrentUser) {
  const adminEmail=process.env.ADMIN_EMAIL?.trim().toLowerCase();
- return !!adminEmail&&user.emailVerified===true&&user.email.trim().toLowerCase()===adminEmail;
+ return user.authType==='email'&&!!adminEmail&&user.emailVerified===true&&user.email.trim().toLowerCase()===adminEmail;
 }
 function view(state:State|null,version:number,user:CurrentUser) {
  if(!state) return {role:canSetUpWorkspace(user)?'setup':'guest',version,userName:user.displayName};
- const admin=state.ownerId===user.userId; const employee=state.employees.find(e=>e.userId===user.userId&&e.active);
+ const admin=canSetUpWorkspace(user)&&state.ownerId===user.userId; const employee=user.authType==='phone'?state.employees.find(e=>e.id===user.employeeId&&e.phone&&e.phoneVersion===user.phoneVersion&&e.active):undefined;
  if(!admin&&!employee) return {role:'guest',version,userName:user.displayName};
  return {role:admin?'admin':'employee',userName:user.displayName,employeeId:employee?.id,version,priorityConfirmed:state.priorityConfirmed,notes:admin?state.notes:[],weeks:state.weeks,settings:workHourSettings(state),
-  employees:state.employees.map(e=>({id:e.id,name:e.name,active:e.active,hireDate:admin?e.hireDate:'',priority:admin?e.priority:0,connected:admin?!!e.userId:undefined})),
+  employees:state.employees.map(e=>({id:e.id,name:e.name,active:e.active,hireDate:admin?e.hireDate:'',priority:admin?e.priority:0,phone:admin?(e.phone??''):undefined,connected:admin?!!e.phone:undefined})),
   shifts:state.shifts.map(s=>admin||state.weeks[weekOf(s.date)]==='published'?s:{...s,employeeId:null,source:'draft',note:undefined}),
   requests:admin?state.requests:state.requests.filter(r=>r.employeeId===employee!.id)};
 }
-export async function GET(){try{const user=await getCurrentUser();if(!user)return json({error:'Sign in to access the schedule.'},401);if(!user.emailVerified)return json({error:'Verify your email before accessing the schedule.'},403);const saved=await readState();return json(view(saved?.state??null,saved?.version??0,user));}catch(e){console.error('Schedule read failed',e);return json({error:'Your schedule could not load. Please try again.'},503);}}
+export async function GET(){try{const user=await getCurrentUser();if(!user)return json({error:'Sign in to access the schedule.'},401);if(user.authType==='email'&&!user.emailVerified)return json({error:'Verify your email before accessing the schedule.'},403);const saved=await readState();return json(view(saved?.state??null,saved?.version??0,user));}catch(e){console.error('Schedule read failed',e);return json({error:'Your schedule could not load. Please try again.'},503);}}
 export async function POST(req:Request){try{
  if(!isSameOriginRequest(req))fail('Request origin is not allowed.',403);
  const user=await getCurrentUser();if(!user)fail('Sign in to continue.',401);
- if(!user.emailVerified)fail('Verify your email before accessing the schedule.',403);
+ if(user.authType==='email'&&!user.emailVerified)fail('Verify your email before accessing the schedule.',403);
  let raw:unknown;try{raw=await req.json();}catch{fail('Send a valid JSON request.');}
  const parsed=input.safeParse(raw);if(!parsed.success)fail(parsed.error.issues[0]?.message??'Check your input.');const a=parsed.data;
  const saved=await readState();
@@ -62,30 +60,30 @@ export async function POST(req:Request){try{
   return json({...view(state,0,user),message:'Front Desk schedule imported.'});
  }
  if(!saved)fail('The admin needs to set up this workspace first.',403);
- const {state,version}=saved;const admin=state.ownerId===user.userId;const me=state.employees.find(e=>e.userId===user.userId&&e.active);
- if(a.action!=='join'&&!admin&&!me)fail('Enter your employee joining code first.',403);
- if(!['join','request','withdraw'].includes(a.action)&&!admin)fail('Only the admin can make this change.',403);
+ const {state,version}=saved;const admin=canSetUpWorkspace(user)&&state.ownerId===user.userId;const me=user.authType==='phone'?state.employees.find(e=>e.id===user.employeeId&&e.phone&&e.phoneVersion===user.phoneVersion&&e.active):undefined;
+ if(!admin&&!me)fail('Sign in with the phone number your admin added to your employee profile.',403);
+ if(!['request','withdraw'].includes(a.action)&&!admin)fail('Only the admin can make this change.',403);
  if((raw as Record<string,unknown>).version!==version)fail('The schedule changed in another session. Refresh and try again.',409);
- let message='Changes saved.';let code:string|undefined;
+ let message='Changes saved.';
  const getShift=(id:string)=>{const s=state.shifts.find(s=>s.id===id);if(!s)fail('Shift no longer exists.',404);return s;};
  const getEmployee=(id:string)=>{const e=state.employees.find(e=>e.id===id&&e.active);if(!e)fail('Employee not found.',404);return e;};
  const markDraft=(s:Shift)=>{state.weeks[weekOf(s.date)]='draft';};
  switch(a.action){
- case 'join':{
-  if(admin||me)fail('This account already belongs to the schedule.');
-  const digest=await hash(a.code);const e=state.employees.find(e=>e.active&&!e.userId&&e.codeHash===digest&&(e.codeExpires??0)>Date.now());
-  if(!e)fail('That code is invalid, expired, or already used. Ask your admin for a new code.');
-  e.userId=user.userId;delete e.codeHash;delete e.codeExpires;message='You have joined the team.';break;
- }
  case 'employee':{
   if(a.hireDate&&a.hireDate>new Date().toISOString().slice(0,10))fail('Hire date cannot be in the future.');
-  if(a.id){const e=getEmployee(a.id);e.name=a.name;e.hireDate=a.hireDate;}
-  else {if(state.employees.length>=200)fail('Employee limit reached.');state.employees.push({id:crypto.randomUUID(),name:a.name,hireDate:a.hireDate,priority:state.employees.length+1,active:true});}break;
- }
- case 'code':{
-  const e=getEmployee(a.employeeId);if(e.userId)fail('This employee has already joined.');
-  code=Array.from(crypto.getRandomValues(new Uint8Array(10)),b=>b.toString(16).padStart(2,'0')).join('').toUpperCase().match(/.{1,5}/g)!.join('-');
-  e.codeHash=await hash(code);e.codeExpires=Date.now()+7*86400000;message='New joining code created. It expires in 7 days.';break;
+  const previous=a.id?getEmployee(a.id):undefined;
+  const phone=a.phone===undefined?(previous?.phone??''):a.phone?normalizePhone(a.phone):'';
+  if(phone===null)fail('Enter a 10-digit US/Canada phone number or an international number with +country code.');
+  if(phone&&state.employees.some(e=>e.id!==a.id&&e.active&&normalizePhone(e.phone??'')===phone))fail('That phone number is already assigned to another employee.',409);
+  if(previous){
+   previous.name=a.name;previous.hireDate=a.hireDate;
+   if((previous.phone??'')!==phone||phone&&!previous.phoneVersion){previous.phone=phone;previous.phoneVersion=crypto.randomUUID();}
+   delete previous.userId;delete previous.codeHash;delete previous.codeExpires;
+  } else {
+   if(state.employees.length>=200)fail('Employee limit reached.');
+   state.employees.push({id:crypto.randomUUID(),name:a.name,hireDate:a.hireDate,phone,phoneVersion:crypto.randomUUID(),priority:state.employees.length+1,active:true});
+  }
+  message='Employee saved.';break;
  }
  case 'priority':{
   const ids=state.employees.filter(e=>e.active).map(e=>e.id);if(new Set(a.ids).size!==ids.length||a.ids.length!==ids.length||ids.some(id=>!a.ids.includes(id)))fail('Include every active employee once.');
@@ -123,5 +121,5 @@ export async function POST(req:Request){try{
  case 'publish':{if(!state.shifts.some(s=>weekOf(s.date)===a.week))fail('Create shifts before publishing.');if(a.published){const issues=weekHourIssues(state,a.week);if(issues.length&&!a.overrideHourLimits)fail('This schedule exceeds work-hour limits. Review the flagged employees and explicitly approve an admin override before publishing.',422);}state.weeks[a.week]=a.published?'published':'draft';message=a.published?'Schedule published to employees.':'Week reopened for requests and edits.';break;}
  }
  const result=await commitState(state,version);if(!result.meta.changes)fail('Someone updated the schedule. Refresh and try again.',409);
- return json({...view(state,version+1,user),message,...(code?{code}:{})});
+ return json({...view(state,version+1,user),message});
  }catch(e){const status=(e as {status?:number}).status??500;if(status>=500)console.error('Schedule update failed',e);return json({error:status>=500?'Changes could not be saved. Please try again.':(e as Error).message},status);}}

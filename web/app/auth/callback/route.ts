@@ -1,3 +1,4 @@
+import { clearEmployeeSession } from "@/lib/employee-session";
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient, hasSupabaseConfiguration } from "@/lib/supabase/server";
@@ -37,6 +38,11 @@ export async function GET(request: NextRequest) {
       await supabase.auth.signOut({ scope: "local" });
       return goTo(request, "/login?status=confirm-email");
     }
+    if (user.email?.trim().toLowerCase() !== process.env.ADMIN_EMAIL?.trim().toLowerCase()) {
+      await supabase.auth.signOut({ scope: "local" });
+      return goTo(request, "/login?mode=signin&status=admin-only");
+    }
+    await clearEmployeeSession();
     return goTo(request, returnTo);
   } catch {
     return goTo(request, "/login?status=invalid-link");

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient, hasSupabaseConfiguration } from "@/lib/supabase/server";
 import { actionOrigin } from "@/app/auth/origin";
 import { safeReturnPath } from "@/app/auth/paths";
+import { clearEmployeeSession } from "@/lib/employee-session";
 
 type Mode = "signin" | "signup" | "forgot-password";
 
@@ -15,6 +16,10 @@ function field(form: FormData, name: string): string {
 function emailAddress(form: FormData): string | null {
   const email = field(form, "email").trim().toLowerCase();
   return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
+function isAdminEmail(email: string): boolean {
+  return Boolean(process.env.ADMIN_EMAIL?.trim()) && email === process.env.ADMIN_EMAIL?.trim().toLowerCase();
 }
 
 function goToLogin(form: FormData, mode: Mode, status: string): never {
@@ -37,6 +42,7 @@ export async function signIn(form: FormData): Promise<void> {
   const password = field(form, "password");
   if (!email || !password || password.length > 128) goToLogin(form, "signin", "invalid-credentials");
 
+  if (!isAdminEmail(email)) goToLogin(form, "signin", "admin-only");
   let status: string | null = null;
   try {
     const supabase = await createClient();
@@ -51,6 +57,7 @@ export async function signIn(form: FormData): Promise<void> {
     status = "unavailable";
   }
   if (status) goToLogin(form, "signin", status);
+  await clearEmployeeSession();
   redirect(safeReturnPath(field(form, "return_to")));
 }
 
@@ -60,6 +67,7 @@ export async function signUp(form: FormData): Promise<void> {
   const password = field(form, "password");
   const name = field(form, "name").trim();
   if (!email || !name || name.length > 80) goToLogin(form, "signup", "invalid-details");
+  if (!isAdminEmail(email)) goToLogin(form, "signup", "admin-only");
   if (password.length < 12 || password.length > 128) goToLogin(form, "signup", "password-length");
   const callback = new URL("/auth/callback", origin);
   callback.searchParams.set("next", safeReturnPath(field(form, "return_to")));
@@ -79,7 +87,7 @@ export async function signUp(form: FormData): Promise<void> {
   } catch {
     status = "unavailable";
   }
-  if (signedIn) redirect(safeReturnPath(field(form, "return_to")));
+  if (signedIn) { await clearEmployeeSession(); redirect(safeReturnPath(field(form, "return_to"))); }
   goToLogin(form, "signin", status);
 }
 
@@ -87,6 +95,7 @@ export async function resendConfirmation(form: FormData): Promise<void> {
   const origin = await prepare(form, "signin");
   const email = emailAddress(form);
   if (!email) goToLogin(form, "signin", "invalid-email");
+  if (!isAdminEmail(email)) goToLogin(form, "signin", "check-email");
   const callback = new URL("/auth/callback", origin);
   callback.searchParams.set("next", safeReturnPath(field(form, "return_to")));
   try {
@@ -102,6 +111,7 @@ export async function requestPasswordReset(form: FormData): Promise<void> {
   const origin = await prepare(form, "forgot-password");
   const email = emailAddress(form);
   if (!email) goToLogin(form, "forgot-password", "invalid-email");
+  if (!isAdminEmail(email)) goToLogin(form, "forgot-password", "reset-email");
   const callback = new URL("/auth/callback", origin);
   callback.searchParams.set("next", "/auth/reset-password");
   try {
@@ -121,7 +131,7 @@ export async function updatePassword(form: FormData): Promise<void> {
 
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user?.email_confirmed_at) redirect("/login?mode=forgot-password&status=reset-expired");
+  if (authError || !user?.email_confirmed_at || !user.email || !isAdminEmail(user.email.toLowerCase())) redirect("/login?mode=forgot-password&status=reset-expired");
   let failed = false;
   let passwordUpdated = false;
   let signoutFailed = false;

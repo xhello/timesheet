@@ -10,15 +10,15 @@ The replacement is merged into `main` in the [GitHub Timesheet repository](https
 - Employee shift preferences, custom admin priority, and optional hire-date seniority sorting.
 - Automatic assignment plus manual assignment and drag/move controls.
 - Configurable daily/weekly limits, defaulting to 8 and 40 hours, with explicit admin overrides.
-- Email/password accounts, verified-email admin setup, and one-use employee joining codes.
-- Copyable invitations containing the deployment URL, joining code, and instructions.
+- Verified email/password sign-in for the admin; employees sign in using their registered phone number alone.
+- Admin-managed employee phone numbers and a copyable employee login link. No employee email, password, SMS verification, or invite code.
 - Server-side authorization, private database access, and optimistic concurrency checks.
 
 ## Connect the Timesheet Supabase project
 
 Production reuses the existing Timesheet Supabase project and its original keys. The project had been paused and was resumed during deployment. The following instructions document the configuration for future environments; production already has its **server-only service-role key** configured.
 
-Production already has `supabase/migrations/0001_workspace.sql` applied. For a fresh environment, run only that migration from this repository in the project's SQL Editor. This additive migration creates `public.schedule_workspace`; it does not change Timesheet attendance tables or import their records. Apply it once. If the table already exists, inspect its schema and data before making changes.
+Production has the migrations in `supabase/migrations/` applied. For a fresh environment, run them in filename order in the project's SQL Editor. `0001_workspace.sql` creates the private scheduler store. `0002_employee_login_rate_limits.sql` adds shared login counters and a server-only rate-limit function. These additions do not change Timesheet attendance tables or import their records. If the table already exists, inspect its schema and data before making changes.
 
 The scheduling table enables Row Level Security and revokes access from anonymous and authenticated browser clients. The server accesses it using the service role and enforces application permissions. Existing Timesheet tables and their policies remain unchanged.
 
@@ -41,7 +41,8 @@ Use Node.js 24. Copy `web/.env.example` to `web/.env.local` if a local configura
 | `NEXT_PUBLIC_SUPABASE_URL` | The existing Timesheet Supabase project's active URL. |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | That project's public API key. The existing `NEXT_PUBLIC_SUPABASE_ANON_KEY` variable is also supported. |
 | `SUPABASE_SERVICE_ROLE_KEY` | That same project's server-only service-role key. Never prefix it with `NEXT_PUBLIC_`. |
-| `ADMIN_EMAIL` | The email of the administrator who will verify their account and initialize the workspace. |
+| `ADMIN_EMAIL` | The only email allowed to register or sign in as administrator. |
+| `EMPLOYEE_SESSION_SECRET` | A random server-only secret of at least 32 characters for employee sessions. Keep it stable across deployments. Changing it signs every employee out. |
 | `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` locally; the confirmed HTTPS app URL in production. |
 
 Never commit `web/.env.local`, service-role keys, or deployment credentials. A successful build without these values does not establish a working database or sign-in flow.
@@ -58,7 +59,7 @@ npm run typecheck
 npm run dev
 ```
 
-Open `http://localhost:3000`. Full integration verification requires the configured database, migration, and Auth settings. Check verified admin setup, an employee joining with a fresh code, shift requests, priority assignment, hour-limit enforcement and override, sign-out, and password reset. Use designated test accounts for onboarding checks.
+Open `http://localhost:3000`. Full integration verification requires the configured database, migration, and Auth settings. Check verified admin setup, employee phone login, shift requests, priority assignment, hour-limit enforcement and override, sign-out, and admin password reset. Verify phone changes revoke existing employee sessions. Use designated test accounts for onboarding checks.
 
 ## Publish future changes to GitHub and Vercel
 
@@ -85,15 +86,17 @@ The **existing Timesheet Vercel project** is already linked to GitHub `xhello/ti
 - The environment variables above for Production, and Preview when previews need the database. Keep the service-role key server-only.
 - `NEXT_PUBLIC_SITE_URL` matching the actual production/custom domain, with matching Supabase Site URL and redirect allowlist.
 
-Review a preview deployment and its database/authentication behavior before merging to the configured production branch. A preview using the production database can change shared schedule data; use designated test data when validating writes. After production deployment, verify sign-in, schedule loading, and the URL copied by **Copy invite**. The existing public address is `https://timesheet-sable.vercel.app`; the replacement uses it after the production deployment succeeds.
+Review a preview deployment and its database/authentication behavior before merging to the configured production branch. A preview using the production database can change shared schedule data; use designated test data when validating writes. After production deployment, verify both sign-in methods, schedule loading, and the URL copied by **Copy login link**. The existing public address is `https://timesheet-sable.vercel.app`; the replacement uses it after the production deployment succeeds.
 
 ## Data and account transition
 
 Admin setup imports the original October 11–17, 2026 Front Desk spreadsheet snapshot: seven employees and 35 slots. Google Sheets is an initial snapshot, not live synchronization. No live Timesheet records or later edits from the earlier Sites-hosted schedule have been migrated.
 
-Timesheet business codes, client-side password hashes, and face profiles are not Supabase Auth accounts. Create and verify the account matching `ADMIN_EMAIL`, sign in, and select **Set up my admin workspace**. Employees create verified accounts and use fresh joining codes to link to roster entries. Old Timesheet or ChatGPT identities and old invitation codes do not grant access.
+The admin creates and verifies the account matching `ADMIN_EMAIL`, signs in through **Admin sign in**, and selects **Set up my admin workspace**. Existing admin accounts continue working. Under **Team & priority**, edit each employee and save their phone number. Employees open `/login` and enter that number; no account registration or verification step is required. Old employee email identities and joining codes no longer grant employee access.
 
-Codes expire after seven days and work once; issuing a new code invalidates the prior unused code. Account creation alone gives no schedule access. Review roster details, priority, hire dates, and imported shifts before inviting the team.
+Use one unique phone number per active employee. US/Canada 10-digit numbers are normalized to +1; other numbers require an explicit +country code. Leaving a number blank disables employee login. Changing or clearing it invalidates existing sessions; ordinary name or hire-date edits preserve them. Employee sessions last up to seven days and cannot access admin controls or other employees' phone numbers.
+
+Phone-only access is intentional: anyone who knows a registered number can sign in as that employee. Signed HttpOnly cookies and shared rate limits protect session integrity and limit guessing; they do not verify ownership of the number. Review roster details, priority, hire dates, and imported shifts before sharing the login link.
 
 Hours use calendar days and Sunday–Saturday weeks. Overnight hours split at midnight; compatible overlapping duties count once. Auto-assignment fills requested open shifts and skips conflicts or hour-limit overages. Admins can explicitly override hour limits. Publishing closes requests; later schedule edits reopen affected weeks as drafts.
 

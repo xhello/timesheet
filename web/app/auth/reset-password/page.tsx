@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { CalendarDays } from "lucide-react";
 import { requireCurrentUser } from "@/lib/auth";
 import { updatePassword } from "@/app/login/actions";
@@ -10,7 +11,8 @@ export const dynamic = "force-dynamic";
 export default async function ResetPasswordPage({ searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireCurrentUser("/auth/reset-password");
+  const user = await requireCurrentUser("/auth/reset-password");
+  if (user.authType !== "email" || user.email !== process.env.ADMIN_EMAIL?.trim().toLowerCase()) redirect("/login?mode=signin&status=admin-only");
   const params = await searchParams;
   const errors: Record<string, string> = {
     "password-length": "Use a password between 12 and 128 characters.",
