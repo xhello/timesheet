@@ -1,9 +1,34 @@
 export type Employee = { id: string; name: string; hireDate: string; priority: number; phone?: string; phoneVersion?: string; userId?: string; codeHash?: string; codeExpires?: number; active: boolean };
-export type Shift = { id: string; date: string; start: string; end: string; label: string; employeeId: string | null; source: string; note?: string; hourLimitOverride?: boolean; requestAssignmentLocked?: boolean };
+export type Shift = { id: string; date: string; start: string; end: string; label: string; employeeId: string | null; source: string; sheetId?: string; note?: string; hourLimitOverride?: boolean; requestAssignmentLocked?: boolean };
 export type ShiftRequest = { id: string; shiftId: string; employeeId: string; createdAt: string; note: string };
 export type WorkHourSettings = { dailyMaxHours: number; weeklyMaxHours: number };
 export type HourLimitIssue = { employeeId: string; kind: 'day'|'week'; period: string; hours: number; limit: number };
-export type State = { ownerId: string; ownerName: string; employees: Employee[]; shifts: Shift[]; requests: ShiftRequest[]; weeks: Record<string, 'draft'|'published'>; imported: boolean; priorityConfirmed: boolean; notes: string[]; settings?: WorkHourSettings };
+export type Sheet = { id: string; name: string };
+export type WeekStatus = 'draft'|'published';
+export type State = { ownerId: string; ownerName: string; employees: Employee[]; shifts: Shift[]; requests: ShiftRequest[]; weeks: Record<string, WeekStatus>; sheets?: Sheet[]; sheetWeeks?: Record<string,Record<string,WeekStatus>>; imported: boolean; priorityConfirmed: boolean; notes: string[]; settings?: WorkHourSettings };
+export const DEFAULT_SHEET_ID = 'front-desk';
+export const DEFAULT_SHEETS: Sheet[] = [{id:DEFAULT_SHEET_ID,name:'Front Desk'},{id:'waiter',name:'Waiter'},{id:'cook',name:'Cook'}];
+type SheetState = Pick<State,'sheets'>;
+type SheetWeekState = Pick<State,'weeks'|'sheetWeeks'>;
+/** Old workspaces retain their Front Desk identities without a data migration. */
+export function scheduleSheets(state: SheetState): Sheet[] {
+  const sheets=new Map(DEFAULT_SHEETS.map(sheet=>[sheet.id,{...sheet}]));
+  for(const sheet of state.sheets??[]) {
+    if(!sheet||typeof sheet.id!=='string'||!/^[a-zA-Z0-9_-]{1,80}$/.test(sheet.id)||['__proto__','constructor','prototype'].includes(sheet.id)||typeof sheet.name!=='string'||!sheet.name.trim()||sheet.name.trim().length>80)continue;
+    if(sheets.has(sheet.id)||sheets.size<20)sheets.set(sheet.id,{id:sheet.id,name:sheet.name.trim()});
+  }
+  return [...sheets.values()];
+}
+export function shiftSheetId(shift: Pick<Shift,'sheetId'>): string {return shift.sheetId??DEFAULT_SHEET_ID;}
+export function weeksForSheet(state: SheetWeekState, sheetId=DEFAULT_SHEET_ID): Record<string,WeekStatus> {
+  return sheetId===DEFAULT_SHEET_ID?state.weeks:Object.hasOwn(state.sheetWeeks??{},sheetId)?state.sheetWeeks![sheetId]:{};
+}
+export function sheetWeekStatus(state: SheetWeekState,week:string,sheetId=DEFAULT_SHEET_ID): WeekStatus|undefined {return weeksForSheet(state,sheetId)[weekOf(week)];}
+export function setSheetWeekStatus(state: State,week:string,sheetId:string,status:WeekStatus): void {
+  const key=weekOf(week);
+  if(sheetId===DEFAULT_SHEET_ID)state.weeks[key]=status;
+  else {state.sheetWeeks??={};if(!Object.hasOwn(state.sheetWeeks,sheetId))state.sheetWeeks[sheetId]={};state.sheetWeeks[sheetId][key]=status;}
+}
 export const DEFAULT_WORK_HOUR_SETTINGS: WorkHourSettings = { dailyMaxHours: 8, weeklyMaxHours: 40 };
 export function workHourSettings(state: { settings?: WorkHourSettings }): WorkHourSettings { return {...DEFAULT_WORK_HOUR_SETTINGS,...state.settings}; }
 export const INITIAL_WEEK = '2026-10-11';
@@ -55,16 +80,26 @@ export function weekHourIssues(state:Pick<State,'shifts'|'settings'|'employees'>
     return issuesForDates(state.shifts,employee.id,dates,workHourSettings(state));
   });
 }
+/** Review this department's staff using their work across every department. */
+export function sheetWeekHourIssues(state:Pick<State,'shifts'|'settings'|'employees'>,week:string,sheetId=DEFAULT_SHEET_ID):HourLimitIssue[] {
+  const w=weekOf(week),selected=state.shifts.filter(shift=>shiftSheetId(shift)===sheetId&&touchedDates(shift).some(day=>weekOf(day)===w));
+  const assignedIds=new Set(selected.flatMap(shift=>shift.employeeId?[shift.employeeId]:[]));
+  return state.employees.filter(employee=>assignedIds.has(employee.id)).flatMap(employee=>{
+    const dates=Array.from({length:7},(_,i)=>addDays(w,i));
+    for(const shift of selected)if(shift.employeeId===employee.id)dates.push(...touchedDates(shift).filter(day=>day>=w));
+    return issuesForDates(state.shifts,employee.id,dates,workHourSettings(state));
+  });
+}
 export function formatHours(hours:number) {return Number(hours.toFixed(2)).toString();}
 export function hourIssueText(issue:HourLimitIssue) {return `${formatHours(issue.hours)} hours ${issue.kind==='day'?'on':'in the week of'} ${issue.period} (limit ${formatHours(issue.limit)})`;}
 
 export type WeekCopyPlan = { shifts: Shift[]; hourIssues: HourLimitIssue[]; overlapEmployeeIds: string[]; unassignedCount: number };
 
 /** Preview a copy without altering saved shifts or carrying private data/approvals. */
-export function planWeekCopy(state: Pick<State,'shifts'|'employees'|'settings'>, targetWeek: string, sourceWeek: string, copyAssignments = false): WeekCopyPlan {
+export function planWeekCopy(state: Pick<State,'shifts'|'employees'|'settings'>, targetWeek: string, sourceWeek: string, copyAssignments = false, sheetId=DEFAULT_SHEET_ID): WeekCopyPlan {
   const target=weekOf(targetWeek),source=weekOf(sourceWeek);
   if(source>=target) throw new Error('Choose a source week earlier than the new week.');
-  const originals=state.shifts.filter(shift=>weekOf(shift.date)===source)
+  const originals=state.shifts.filter(shift=>weekOf(shift.date)===source&&shiftSheetId(shift)===sheetId)
     .sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start)||a.id.localeCompare(b.id));
   if(!originals.length) throw new Error('The source week has no shifts to copy.');
   const activeIds=new Set(state.employees.filter(employee=>employee.active).map(employee=>employee.id));
@@ -72,7 +107,7 @@ export function planWeekCopy(state: Pick<State,'shifts'|'employees'|'settings'>,
   const shifts:Shift[]=originals.map(original=>{
     const employeeId=copyAssignments&&original.employeeId&&activeIds.has(original.employeeId)?original.employeeId:null;
     if(copyAssignments&&original.employeeId&&!employeeId) unassignedCount++;
-    return {id:`copy:${target}:${original.id}`,date:addDays(target,new Date(original.date+'T12:00:00Z').getUTCDay()),start:original.start,end:original.end,label:original.label,employeeId,source:'copy'};
+    return {id:`copy:${sheetId}:${target}:${original.id}`,date:addDays(target,new Date(original.date+'T12:00:00Z').getUTCDay()),start:original.start,end:original.end,label:original.label,employeeId,source:'copy',sheetId};
   });
   const hourIssues:HourLimitIssue[]=[],overlapEmployeeIds:string[]=[];
   const affectedIds=[...new Set(shifts.flatMap(shift=>shift.employeeId?[shift.employeeId]:[]))];
@@ -103,7 +138,7 @@ export function reconcileRequestAssignments(state: State): number {
   const active=state.employees.filter(employee=>employee.active);
   if(!state.priorityConfirmed||!active.length||active.some(employee=>!Number.isSafeInteger(employee.priority)||employee.priority<=0)||new Set(active.map(employee=>employee.priority)).size!==active.length) return 0;
 
-  const candidates=state.shifts.filter(shift=>state.weeks[weekOf(shift.date)]!=='published'&&!shift.requestAssignmentLocked&&(!shift.employeeId||shift.source==='request-priority'))
+  const candidates=state.shifts.filter(shift=>sheetWeekStatus(state,shift.date,shiftSheetId(shift))!=='published'&&!shift.requestAssignmentLocked&&(!shift.employeeId||shift.source==='request-priority'))
     .sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start)||a.id.localeCompare(b.id));
   const before=new Map(candidates.map(shift=>[shift.id,{employeeId:shift.employeeId,source:shift.source,hourLimitOverride:shift.hourLimitOverride}]));
   const requestsByShift=new Map<string,ShiftRequest[]>();
@@ -132,9 +167,9 @@ export function reconcileRequestAssignments(state: State): number {
   }).length;
 }
 
-export function fillByPriority(state: State, week: string) {
+export function fillByPriority(state: State, week: string, sheetId=DEFAULT_SHEET_ID) {
   let assigned=0;
-  const shifts=state.shifts.filter(s=>weekOf(s.date)===week).sort((a,b)=>(a.date+a.start+a.id).localeCompare(b.date+b.start+b.id));
+  const shifts=state.shifts.filter(s=>weekOf(s.date)===week&&shiftSheetId(s)===sheetId&&sheetWeekStatus(state,s.date,sheetId)!=='published').sort((a,b)=>(a.date+a.start+a.id).localeCompare(b.date+b.start+b.id));
   for(const shift of shifts) {
     if(shift.employeeId) continue;
     const requests=state.requests.filter(r=>r.shiftId===shift.id).sort((a,b)=>{

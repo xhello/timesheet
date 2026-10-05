@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fillByPriority, overlaps, weekOf, rankedRequests, reconcileRequestAssignments, planWeekCopy} from '../lib/schedule.ts';
+import {fillByPriority, overlaps, weekOf, rankedRequests, reconcileRequestAssignments, planWeekCopy, DEFAULT_SHEET_ID, scheduleSheets, shiftSheetId, weeksForSheet, sheetWeekStatus, setSheetWeekStatus, sheetWeekHourIssues} from '../lib/schedule.ts';
 const shift=(id,date,start,end,employeeId=null)=>({id,date,start,end,label:'Desk',employeeId,source:'test'});
 const request=(id,shiftId,employeeId,createdAt='2026-10-01T00:00:00Z')=>({id,shiftId,employeeId,createdAt,note:''});
 function state(shifts,requests){return {ownerId:'owner',ownerName:'Admin',employees:[{id:'senior',priority:1,active:true},{id:'junior',priority:2,active:true}],shifts,requests,weeks:{},priorityConfirmed:true,imported:false,notes:[]};}
@@ -167,7 +167,7 @@ test('week copy preserves weekday and civil hours across year and daylight-savin
   const plan=planWeekCopy(s,'2027-01-05','2026-12-30');
   assert.deepEqual(plan.shifts.map(x=>[x.date,x.start,x.end]),[['2027-01-07','18:15','20:45'],['2027-01-09','22:00','06:00']]);
   assert.ok(plan.shifts.every(x=>x.employeeId===null&&x.source==='copy'));
-  assert.deepEqual(Object.keys(plan.shifts[1]).sort(),['date','employeeId','end','id','label','source','start']);
+  assert.deepEqual(Object.keys(plan.shifts[1]).sort(),['date','employeeId','end','id','label','sheetId','source','start']);
   assert.deepEqual(s,before);
   assert.deepEqual(planWeekCopy(s,'2027-01-05','2026-12-30'),plan);
   const spring=state([shift('morning','2026-03-01','07:30','13:00')],[]);
@@ -209,4 +209,70 @@ test('week copy rejects empty, same, and later source weeks',()=>{
   assert.throws(()=>planWeekCopy(s,'2026-10-11','2026-10-11'),/earlier/);
   assert.throws(()=>planWeekCopy(s,'2026-10-04','2026-10-11'),/earlier/);
   assert.throws(()=>planWeekCopy(s,'2026-10-25','2026-10-18'),/no shifts/);
+});
+
+test('legacy schedules use Front Desk without migrating identities and saved sheets expose only names and IDs',()=>{
+  const s=state([shift('legacy','2026-10-11','08:00','12:00')],[request('legacy-request','legacy','senior')]);
+  s.weeks['2026-10-11']='published';
+  const before=structuredClone(s);
+  assert.equal(shiftSheetId(s.shifts[0]),DEFAULT_SHEET_ID);
+  assert.equal(sheetWeekStatus(s,'2026-10-13'),'published');
+  assert.deepEqual(weeksForSheet(s,'waiter'),{});
+  assert.deepEqual(scheduleSheets(s),[{id:'front-desk',name:'Front Desk'},{id:'waiter',name:'Waiter'},{id:'cook',name:'Cook'}]);
+  assert.deepEqual(s,before);
+  s.sheets=[{id:'waiter',name:'Dining',privateNote:'Private'},{id:'laundry',name:' Laundry ',phone:'Private'},{id:'__proto__',name:'Bad'}];
+  assert.deepEqual(scheduleSheets(s),[{id:'front-desk',name:'Front Desk'},{id:'waiter',name:'Dining'},{id:'cook',name:'Cook'},{id:'laundry',name:'Laundry'}]);
+  setSheetWeekStatus(s,'2026-10-13','waiter','draft');
+  assert.equal(sheetWeekStatus(s,'2026-10-11','waiter'),'draft');
+  assert.equal(s.weeks['2026-10-11'],'published');
+  assert.deepEqual(s.shifts,before.shifts);assert.deepEqual(s.requests,before.requests);
+});
+
+test('department copies select only their source shifts but check global overlaps and hours',()=>{
+  const s=state([
+    shift('front-source','2026-10-11','08:00','12:00','junior'),
+    {...shift('waiter-source','2026-10-11','12:00','17:00','senior'),sheetId:'waiter',note:'Private'},
+    {...shift('cook-source','2026-10-11','09:00','12:00','senior'),sheetId:'cook'},
+    shift('front-target','2026-10-25','08:00','13:00','senior'),
+  ],[]);
+  const before=structuredClone(s);
+  const plan=planWeekCopy(s,'2026-10-25','2026-10-11',true,'waiter');
+  assert.equal(plan.shifts.length,1);
+  assert.equal(plan.shifts[0].sheetId,'waiter');assert.equal(plan.shifts[0].date,'2026-10-25');
+  assert.equal(plan.shifts[0].note,undefined);
+  assert.deepEqual(plan.overlapEmployeeIds,['senior']);
+  assert.deepEqual(plan.hourIssues,[{employeeId:'senior',kind:'day',period:'2026-10-25',hours:9,limit:8}]);
+  assert.deepEqual(planWeekCopy(s,'2026-10-25','2026-10-11').shifts.map(x=>x.sheetId),['front-desk']);
+  assert.deepEqual(s,before);
+});
+
+test('reconciliation freezes each published department independently while sharing priority, hours, and conflicts',()=>{
+  const s=state([
+    {...shift('front-frozen','2026-10-11','08:00','16:00','senior'),source:'request-priority'},
+    {...shift('waiter-open','2026-10-11','16:00','18:00'),sheetId:'waiter'},
+    {...shift('cook-open','2026-10-11','17:00','19:00'),sheetId:'cook'},
+  ],[request('front-junior','front-frozen','junior'),request('waiter-senior','waiter-open','senior'),request('waiter-junior','waiter-open','junior'),request('cook-junior','cook-open','junior')]);
+  s.weeks['2026-10-11']='published';
+  s.sheetWeeks={waiter:{'2026-10-11':'draft'},cook:{'2026-10-11':'draft'}};
+  assert.equal(reconcileRequestAssignments(s),1);
+  assert.deepEqual(s.shifts.map(x=>x.employeeId),['senior','junior',null]);
+  s.sheetWeeks.waiter['2026-10-11']='published';
+  s.requests=s.requests.filter(x=>x.shiftId!=='waiter-open');
+  assert.equal(reconcileRequestAssignments(s),0);
+  assert.equal(s.shifts[1].employeeId,'junior');
+  setSheetWeekStatus(s,'2026-10-11','waiter','draft');
+  assert.equal(reconcileRequestAssignments(s),2);
+  assert.deepEqual(s.shifts.map(x=>x.employeeId),['senior',null,'junior']);
+});
+
+test('department publish review uses global totals for selected staff and includes overnight week spill',()=>{
+  const s=state([
+    {...shift('waiter-night','2026-10-17','22:00','06:00','senior'),sheetId:'waiter'},
+    ...Array.from({length:5},(_,i)=>({...shift(`cook-${i}`,`2026-10-${19+i}`,'08:00','16:00','senior'),sheetId:'cook'})),
+    {...shift('other-overage','2026-10-11','08:00','20:00','junior'),sheetId:'cook'},
+  ],[]);
+  assert.deepEqual(sheetWeekHourIssues(s,'2026-10-11','waiter'),[{employeeId:'senior',kind:'week',period:'2026-10-18',hours:46,limit:40}]);
+  assert.deepEqual(sheetWeekHourIssues(s,'2026-10-11','front-desk'),[]);
+  assert.ok(sheetWeekHourIssues(s,'2026-10-18','waiter').some(issue=>issue.hours===46));
+  assert.ok(sheetWeekHourIssues(s,'2026-10-11','cook').every(issue=>issue.employeeId==='junior'));
 });

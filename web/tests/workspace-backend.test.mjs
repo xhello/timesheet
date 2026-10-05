@@ -334,7 +334,7 @@ test('copy week defaults to unassigned fresh shifts and preserves source data, r
   for(const shift of copied){
     assert.match(shift.id,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.ok(!state.shifts.some(s=>s.id===shift.id));
-    assert.deepEqual(Object.keys(shift).sort(),['date','employeeId','end','id','label','source','start']);
+    assert.deepEqual(Object.keys(shift).sort(),['date','employeeId','end','id','label','sheetId','source','start']);
   }
 });
 
@@ -482,14 +482,14 @@ test('anonymous calendar uses an explicit public whitelist including draft assig
   assert.equal(response.status,200);
   assert.equal(response.headers.get('cache-control'),'no-store');
   const data=await response.json();
-  assert.deepEqual(Object.keys(data).sort(),['employees','notes','priorityConfirmed','requests','role','settings','shifts','userName','version','weeks']);
+  assert.deepEqual(Object.keys(data).sort(),['employees','notes','priorityConfirmed','requests','role','settings','sheetWeeks','sheets','shifts','userName','version','weeks']);
   assert.equal(data.role,'public');assert.equal(data.userName,'');assert.equal(data.version,12);
   assert.equal(data.priorityConfirmed,false);
   assert.deepEqual(data.requests,[]);assert.deepEqual(data.notes,[]);
   assert.deepEqual(data.settings,{dailyMaxHours:8,weeklyMaxHours:40});
   assert.deepEqual(data.weeks,{'2026-10-11':'draft','2026-10-18':'published'});
   assert.deepEqual(data.employees,[{id:employee.employeeId,name:'Employee',hireDate:'',priority:0,active:true},{id:'other',name:'Other calendar employee',hireDate:'',priority:0,active:true}]);
-  assert.deepEqual(data.shifts,state.shifts.map(({id,date,start,end,label,employeeId,source})=>({id,date,start,end,label,employeeId,source})));
+  assert.deepEqual(data.shifts,state.shifts.map(({id,date,start,end,label,employeeId,source})=>({id,date,start,end,label,employeeId,source,sheetId:'front-desk'})));
   const text=JSON.stringify(data);
   for(const privateValue of ['Private','private-',state.ownerId,state.employees[0].phone,state.employees[0].hireDate,'old-chatgpt-user','old-code'])assert.ok(!text.includes(privateValue),privateValue);
   assert.equal(app.writes(),0);assert.deepEqual(app.snapshot(),saved);
@@ -497,7 +497,7 @@ test('anonymous calendar uses an explicit public whitelist including draft assig
 
 test('anonymous requests to every mutation action remain unauthorized despite public calendar access',async()=>{
   const saved={state:publicCalendarState(),version:2},app=harness({user:null,saved});
-  for(const action of ['setup','employee','priority','settings','assign','move','shift','deleteShift','request','withdraw','auto','week','publish']){
+  for(const action of ['setup','employee','priority','sheet','settings','assign','move','shift','deleteShift','request','withdraw','auto','week','publish']){
     const response=await app.POST(request({action,version:2},'https://schedule.example.test',{'oai-authenticated-user-id':admin.userId,'oai-authenticated-user-email':admin.email}));
     assert.equal(response.status,401,action);
   }
@@ -529,7 +529,7 @@ test('invalid, revoked, unverified, and nonmember identities fall back to the sa
 
 test('an uninitialized calendar returns a usable empty public shape without exposing the imported seed',async()=>{
   const app=harness({user:null});
-  assert.deepEqual(await (await app.GET()).json(),{role:'public',userName:'',version:0,priorityConfirmed:false,notes:[],requests:[],settings:{dailyMaxHours:8,weeklyMaxHours:40},weeks:{},employees:[],shifts:[]});
+  assert.deepEqual(await (await app.GET()).json(),{role:'public',userName:'',version:0,priorityConfirmed:false,notes:[],requests:[],settings:{dailyMaxHours:8,weeklyMaxHours:40},weeks:{},sheets:schedule.DEFAULT_SHEETS,sheetWeeks:{waiter:{},cook:{}},employees:[],shifts:[]});
   assert.equal(app.writes(),0);
   assert.equal((await (await harness().GET()).json()).role,'setup');
 });
@@ -551,4 +551,162 @@ test('signed-in employee calendars include manual and copied drafts while privat
   assert.deepEqual(owner.notes,state.notes);
   assert.equal(owner.shifts[0].note,'Private shift note');
   assert.equal(owner.requests.find(r=>r.id==='other-private-request-id').note,'Private coworker request note');
+});
+
+const departmentShift=(id,sheetId='front-desk',date='2026-10-11',start='08:00',end='12:00',employeeId=null)=>({id,date,start,end,label:id,employeeId,source:'manual',...(sheetId==='front-desk'?{}:{sheetId})});
+const postCurrent=(app,payload)=>app.POST(request({...payload,version:app.snapshot().version}));
+
+test('legacy calendar identities stay unchanged while all roles receive default department metadata',async()=>{
+  const state=copyState(),saved={state,version:7};
+  for(const user of [null,employee,admin]){
+    const app=harness({saved,user}),data=await (await app.GET()).json();
+    assert.deepEqual(data.sheets,schedule.DEFAULT_SHEETS);
+    assert.deepEqual(data.sheetWeeks,{waiter:{},cook:{}});
+    assert.deepEqual(data.weeks,state.weeks);
+    assert.deepEqual(data.shifts.map(s=>s.id),state.shifts.map(s=>s.id));
+    assert.ok(data.shifts.every(s=>s.sheetId==='front-desk'));
+    assert.deepEqual(app.snapshot(),saved);assert.equal(app.writes(),0);
+  }
+});
+
+test('only admins create or rename unique sheets and sheet changes preserve all schedule data',async()=>{
+  const state=copyState(),saved={state,version:0};
+  const member=harness({saved,user:employee});
+  assert.equal((await postCurrent(member,{action:'sheet',name:'Laundry'})).status,403);
+  const app=harness({saved});
+  assert.equal((await postCurrent(app,{action:'sheet',name:'  Laundry  '})).status,200);
+  const laundry=app.snapshot().state.sheets.find(s=>s.name==='Laundry');
+  assert.match(laundry.id,/^[0-9a-f-]{36}$/);
+  assert.equal((await postCurrent(app,{action:'sheet',name:'lAuNdRy'})).status,409);
+  assert.equal((await postCurrent(app,{action:'sheet',id:'waiter',name:'Kitchen'})).status,200);
+  assert.equal((await postCurrent(app,{action:'sheet',id:'cook',name:' kitchen '})).status,409);
+  assert.equal((await postCurrent(app,{action:'sheet',id:'missing',name:'Reception'})).status,404);
+  assert.deepEqual(app.snapshot().state.shifts,state.shifts);
+  assert.deepEqual(app.snapshot().state.requests,state.requests);
+  assert.deepEqual(app.snapshot().state.weeks,state.weeks);
+  const capped=initial();capped.sheets=[...schedule.DEFAULT_SHEETS,...Array.from({length:17},(_,i)=>({id:`custom-${i}`,name:`Department ${i}`}))];
+  const limit=harness({saved:{state:capped,version:0}});
+  assert.equal((await postCurrent(limit,{action:'sheet',name:'Too many'})).status,400);
+  assert.equal(limit.writes(),0);
+  const raced=harness({saved,conflict:true});
+  assert.equal((await postCurrent(raced,{action:'sheet',name:'Laundry'})).status,409);
+  assert.deepEqual(raced.snapshot(),saved);
+});
+
+test('sheet-aware actions reject unknown sheets and shift edits never silently move departments',async()=>{
+  const state=initial();state.shifts=[departmentShift('waiter-shift','waiter')];
+  state.weeks={'2026-10-11':'published'};state.sheetWeeks={waiter:{'2026-10-11':'published'},cook:{'2026-10-11':'published'}};
+  const saved={state,version:0};
+  for(const payload of [{action:'shift',date:'2026-10-11',start:'08:00',end:'12:00',label:'New'},{action:'week',week:'2026-10-18'},{action:'auto',week:'2026-10-11'},{action:'publish',week:'2026-10-11',published:true}]){
+    const app=harness({saved});
+    assert.equal((await postCurrent(app,{...payload,sheetId:'unknown'})).status,404);
+    assert.equal(app.writes(),0);assert.deepEqual(app.snapshot(),saved);
+  }
+  const app=harness({saved}),edit={action:'shift',id:'waiter-shift',date:'2026-10-12',start:'09:00',end:'13:00',label:'Breakfast'};
+  assert.equal((await postCurrent(app,{...edit,sheetId:'cook'})).status,400);
+  assert.equal((await postCurrent(app,edit)).status,200);
+  assert.equal(app.snapshot().state.shifts[0].sheetId,'waiter');
+  assert.equal(app.snapshot().state.sheetWeeks.waiter['2026-10-11'],'draft');
+  assert.equal(app.snapshot().state.sheetWeeks.cook['2026-10-11'],'published');
+  assert.equal(app.snapshot().state.weeks['2026-10-11'],'published');
+});
+
+test('departments coexist in the same week with blank defaults and scoped copies without inheriting private data',async()=>{
+  const state=initial();state.priorityConfirmed=true;
+  state.shifts=[departmentShift('legacy'),{...departmentShift('waiter-source','waiter','2026-10-11'),employeeId:employee.employeeId,note:'Private source',hourLimitOverride:true,requestAssignmentLocked:true},departmentShift('front-target','front-desk','2026-10-18')];
+  state.requests=[{id:'source-note',shiftId:'waiter-source',employeeId:employee.employeeId,createdAt:'2026-10-01',note:'Private request'}];
+  state.weeks={'2026-10-11':'published','2026-10-18':'published'};state.sheetWeeks={waiter:{'2026-10-11':'published'}};
+  const app=harness({saved:{state,version:0}});
+  assert.equal((await postCurrent(app,{action:'week',week:'2026-10-13',sheetId:'cook'})).status,200);
+  assert.equal(app.snapshot().state.shifts.length,state.shifts.length);
+  assert.deepEqual(app.snapshot().state.sheetWeeks.cook,{'2026-10-11':'draft'});
+  assert.equal((await postCurrent(app,{action:'week',week:'2026-10-20',sheetId:'waiter',sourceWeek:'2026-10-13'})).status,200);
+  const copy=app.snapshot().state.shifts.at(-1);
+  assert.equal(copy.sheetId,'waiter');assert.equal(copy.date,'2026-10-18');assert.equal(copy.employeeId,null);
+  assert.notEqual(copy.id,'waiter-source');assert.equal(copy.source,'copy');
+  assert.equal(copy.note,undefined);assert.equal(copy.hourLimitOverride,undefined);assert.equal(copy.requestAssignmentLocked,undefined);
+  assert.deepEqual(app.snapshot().state.shifts.slice(0,state.shifts.length),state.shifts);
+  assert.deepEqual(app.snapshot().state.requests,state.requests);
+  assert.deepEqual(app.snapshot().state.weeks,state.weeks);
+  assert.deepEqual(app.snapshot().state.sheetWeeks.waiter,{'2026-10-11':'published','2026-10-18':'draft'});
+  const existing=app.snapshot();
+  assert.equal((await postCurrent(app,{action:'week',week:'2026-10-18',sheetId:'waiter'})).status,409);
+  assert.deepEqual(app.snapshot(),existing);
+  for(const payload of [{sheetId:'waiter',sourceWeek:'2026-10-11',blank:true},{sheetId:'cook',copyAssignments:true},{sheetId:'cook',sourceWeek:'2026-10-11'}])assert.equal((await postCurrent(app,{action:'week',week:'2026-10-25',...payload})).status,400);
+  assert.equal((await postCurrent(app,{action:'week',week:'2026-10-25',blank:true})).status,200);
+  assert.equal(app.snapshot().state.shifts.length,state.shifts.length+1);
+  assert.equal(app.snapshot().state.weeks['2026-10-25'],'draft');
+});
+
+test('department publishing, request gates, reopen and held-open release are independent',async()=>{
+  const state=initial();state.priorityConfirmed=true;
+  state.shifts=[departmentShift('front'),{...departmentShift('waiter','waiter'),requestAssignmentLocked:true},{...departmentShift('cook','cook'),requestAssignmentLocked:true}];
+  state.weeks={'2026-10-11':'published'};state.sheetWeeks={waiter:{'2026-10-11':'draft'},cook:{'2026-10-11':'draft'}};
+  state.requests=[{id:'cook-request',shiftId:'cook',employeeId:employee.employeeId,createdAt:'2026-10-01',note:''}];
+  const member=harness({saved:{state,version:0},user:employee});
+  assert.equal((await postCurrent(member,{action:'request',shiftId:'front',sheetId:'waiter',note:''})).status,400);
+  assert.equal((await postCurrent(member,{action:'request',shiftId:'waiter',sheetId:'front-desk',note:'My private note'})).status,200);
+  const app=harness({saved:member.snapshot()});
+  assert.equal((await postCurrent(app,{action:'auto',week:'2026-10-13',sheetId:'waiter'})).status,200);
+  assert.equal(app.snapshot().state.shifts.find(s=>s.id==='waiter').employeeId,employee.employeeId);
+  assert.equal(app.snapshot().state.shifts.find(s=>s.id==='cook').requestAssignmentLocked,true);
+  assert.equal(app.snapshot().state.shifts.find(s=>s.id==='cook').employeeId,null);
+  assert.equal((await postCurrent(app,{action:'publish',week:'2026-10-13',sheetId:'waiter',published:true})).status,200);
+  assert.equal(app.snapshot().state.weeks['2026-10-11'],'published');
+  assert.equal(app.snapshot().state.sheetWeeks.waiter['2026-10-11'],'published');
+  assert.equal(app.snapshot().state.sheetWeeks.cook['2026-10-11'],'draft');
+  const frozen=harness({saved:app.snapshot(),user:employee});
+  const waiterRequest=frozen.snapshot().state.requests.find(r=>r.shiftId==='waiter');
+  assert.equal((await postCurrent(frozen,{action:'withdraw',requestId:waiterRequest.id})).status,400);
+  assert.equal((await postCurrent(frozen,{action:'request',shiftId:'cook',note:''})).status,200);
+  assert.equal((await postCurrent(app,{action:'publish',week:'2026-10-11',sheetId:'waiter',published:false})).status,200);
+  assert.equal(app.snapshot().state.weeks['2026-10-11'],'published');
+  assert.equal(app.snapshot().state.sheetWeeks.waiter['2026-10-11'],'draft');
+});
+
+test('assignment, move and deletion draft only the sheets belonging to their actual shifts',async()=>{
+  const state=initial();state.shifts=[departmentShift('front'),departmentShift('waiter','waiter'),departmentShift('cook','cook','2026-10-12')];
+  state.weeks={'2026-10-11':'published'};state.sheetWeeks={waiter:{'2026-10-11':'published'},cook:{'2026-10-11':'published'}};
+  const app=harness({saved:{state,version:0}});
+  assert.equal((await postCurrent(app,{action:'assign',shiftId:'waiter',employeeId:employee.employeeId})).status,200);
+  assert.equal(app.snapshot().state.sheetWeeks.waiter['2026-10-11'],'draft');
+  assert.equal(app.snapshot().state.sheetWeeks.cook['2026-10-11'],'published');
+  assert.equal((await postCurrent(app,{action:'move',fromId:'waiter',toId:'cook'})).status,200);
+  assert.equal(app.snapshot().state.sheetWeeks.cook['2026-10-11'],'draft');
+  assert.equal(app.snapshot().state.shifts.find(s=>s.id==='cook').employeeId,employee.employeeId);
+  assert.equal(app.snapshot().state.shifts.find(s=>s.id==='waiter').requestAssignmentLocked,true);
+  assert.equal((await postCurrent(app,{action:'deleteShift',shiftId:'waiter'})).status,200);
+  assert.equal(app.snapshot().state.weeks['2026-10-11'],'published');
+  assert.deepEqual(app.snapshot().state.shifts.find(s=>s.id==='front'),state.shifts[0]);
+});
+
+test('cross-department assignments and copies require fresh overlap and hour approvals',async()=>{
+  const state=initial();state.shifts=[departmentShift('front','front-desk','2026-10-18','08:00','13:00',employee.employeeId),departmentShift('waiter-source','waiter','2026-10-11','12:00','17:00',employee.employeeId),departmentShift('cook-open','cook','2026-10-18','12:00','17:00')];
+  state.weeks={'2026-10-18':'published'};
+  const app=harness({saved:{state,version:0}}),assign={action:'assign',shiftId:'cook-open',employeeId:employee.employeeId};
+  assert.equal((await postCurrent(app,assign)).status,422);
+  assert.equal((await postCurrent(app,{...assign,allowOverlap:true})).status,422);
+  assert.equal(app.writes(),0);
+  const copy={action:'week',week:'2026-10-18',sheetId:'waiter',sourceWeek:'2026-10-11',copyAssignments:true};
+  assert.equal((await postCurrent(app,copy)).status,422);
+  assert.equal((await postCurrent(app,{...copy,allowOverlap:true})).status,422);
+  assert.equal((await postCurrent(app,{...copy,allowOverlap:true,overrideHourLimits:true})).status,200);
+  assert.equal(app.snapshot().state.shifts.at(-1).hourLimitOverride,true);
+  assert.equal(app.snapshot().state.weeks['2026-10-18'],'published');
+  assert.equal((await postCurrent(app,{action:'publish',week:'2026-10-18',sheetId:'waiter',published:true})).status,422);
+  assert.equal((await postCurrent(app,{action:'publish',week:'2026-10-18',sheetId:'waiter',published:true,overrideHourLimits:true})).status,200);
+});
+
+test('public department metadata is whitelisted and unknown or invalid statuses remain private',async()=>{
+  const state=publicCalendarState();
+  state.sheets=[{id:'waiter',name:'Dining',privateNote:'Private sheet note'},{id:'laundry',name:'Laundry',phone:'Private sheet phone'},{id:'__proto__',name:'Private invalid sheet'}];
+  state.shifts[1].sheetId='waiter';
+  state.sheetWeeks={waiter:{'2026-10-11':'published','2026-02-30':'draft','2026-10-18':'Private status','Private metadata':'draft'},laundry:{'2026-10-18':'draft'},unknown:{'2026-10-11':'Private unknown sheet'},'front-desk':{'2026-10-11':'Private duplicate'}};
+  const app=harness({saved:{state,version:0},user:null}),data=await (await app.GET()).json();
+  assert.deepEqual(data.sheets,[{id:'front-desk',name:'Front Desk'},{id:'waiter',name:'Dining'},{id:'cook',name:'Cook'},{id:'laundry',name:'Laundry'}]);
+  assert.deepEqual(data.sheetWeeks,{waiter:{'2026-10-11':'published'},cook:{},laundry:{'2026-10-18':'draft'}});
+  assert.equal(data.weeks['2026-10-11'],'draft');assert.equal(data.shifts[1].sheetId,'waiter');
+  assert.ok(!JSON.stringify(data).includes('Private'));
+  assert.ok(data.shifts.every(s=>Object.keys(s).sort().join(',')==='date,employeeId,end,id,label,sheetId,source,start'));
+  assert.equal(app.writes(),0);
 });

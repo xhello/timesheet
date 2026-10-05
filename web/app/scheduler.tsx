@@ -17,13 +17,14 @@ import ShiftBoard from './shift-board';
 import './calendar.css';
 import WorkHourSettingsPanel from './work-hour-settings';
 import EmployeeAccessLink from './employee-access-link';
-import { assignmentHourIssues, workHourSettings, weekHourIssues, hourIssueText, overlaps, planWeekCopy, type WorkHourSettings, INITIAL_WEEK, SOURCE_URL, addDays, weekOf, type Employee, type Shift, type ShiftRequest } from '@/lib/schedule';
+import { assignmentHourIssues, workHourSettings, scheduleSheets, shiftSheetId, sheetWeekStatus, sheetWeekHourIssues, DEFAULT_SHEET_ID, type Sheet, hourIssueText, overlaps, planWeekCopy, type WorkHourSettings, INITIAL_WEEK, SOURCE_URL, addDays, weekOf, type Employee, type Shift, type ShiftRequest } from '@/lib/schedule';
 
-type Data = {role:'public'|'setup'|'guest'|'admin'|'employee';version:number;userName:string;employeeId?:string;employees:(Employee & {connected?:boolean})[];shifts:Shift[];requests:ShiftRequest[];weeks:Record<string,string>;priorityConfirmed:boolean;notes:string[];settings:WorkHourSettings};
-type Modal = {kind:'assignment'|'employee'|'shift'|'editShift'|'week';shift?:Shift;employee?:Employee;date?:string};
+type Data = {role:'public'|'setup'|'guest'|'admin'|'employee';version:number;userName:string;employeeId?:string;employees:(Employee & {connected?:boolean})[];shifts:Shift[];requests:ShiftRequest[];weeks:Record<string,'draft'|'published'>;sheets?:Sheet[];sheetWeeks?:Record<string,Record<string,'draft'|'published'>>;priorityConfirmed:boolean;notes:string[];settings:WorkHourSettings};
+type Modal = {kind:'assignment'|'employee'|'shift'|'editShift'|'week'|'sheet';shift?:Shift;employee?:Employee;date?:string;sheetId?:string;sheet?:Sheet};
 type ShiftFilter = 'all'|'assigned'|'requested';
 const fmt=(date:string,opts:Intl.DateTimeFormatOptions={month:'short',day:'numeric'})=>new Intl.DateTimeFormat('en-US',{...opts,timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));
 const weekRange=(start:string)=>{const end=addDays(start,6);return start.slice(0,4)===end.slice(0,4)?`${fmt(start)} – ${fmt(end)}, ${start.slice(0,4)}`:`${fmt(start,{month:'short',day:'numeric',year:'numeric'})} – ${fmt(end,{month:'short',day:'numeric',year:'numeric'})}`;};
+const allSavedWeeks=(state:Partial<Pick<Data,'shifts'|'weeks'|'sheetWeeks'>>)=>Array.from(new Set([...(state.shifts??[]).map(shift=>weekOf(shift.date)),...Object.keys(state.weeks??{}),...Object.values(state.sheetWeeks??{}).flatMap(weeks=>Object.keys(weeks))])).sort().reverse();
 const orderedIds=(employees:Employee[])=>employees.filter(employee=>employee.active).sort((a,b)=>a.priority-b.priority||a.name.localeCompare(b.name)).map(employee=>employee.id);
 function Pick({value,onChange,options,label}:{value:string;onChange:(value:string)=>void;options:{value:string;label:string}[];label:string}){
  return <Select value={value} onValueChange={onChange}><SelectTrigger aria-label={label} className="picker"><SelectValue placeholder={label}/></SelectTrigger><SelectContent>{options.map(option=><SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select>;
@@ -58,6 +59,7 @@ export default function Scheduler(){
  const [data,setData]=useState<Data|null>(null);
  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
  const [week,setWeek]=useState(INITIAL_WEEK),[tab,setTabState]=useState('schedule'),[filter,setFilter]=useState<ShiftFilter>('all');
+ const [sheetId,setSheetId]=useState(DEFAULT_SHEET_ID);
  const [jumpTarget,setJumpTarget]=useState<string|null>(null);
  const [modal,setModal]=useState<Modal|null>(null);
  const [confirm,setConfirm]=useState<{title:string;description:string;action:Record<string,unknown>}|null>(null);
@@ -75,7 +77,7 @@ export default function Scheduler(){
 
  useEffect(()=>{setOverrideHourLimits(false);},[employeeId,moveId,modal?.shift?.id]);
  useEffect(()=>{setOverridePublishHours(false);},[confirm]);
- useEffect(()=>{setCopyAllowOverlap(false);setCopyOverrideHours(false);},[copySource,copyAssignments,modal?.kind==='week'?modal.date:undefined,data?.version]);
+ useEffect(()=>{setCopyAllowOverlap(false);setCopyOverrideHours(false);},[copySource,copyAssignments,modal?.kind==='week'?modal.date:undefined,modal?.sheetId,data?.version]);
  useEffect(()=>{if(jumpTarget)document.getElementById(`week-${jumpTarget}`)?.scrollIntoView({block:'start',behavior:'smooth'});},[jumpTarget]);
  useEffect(()=>{setModal(null);setConfirm(null);setNote('');setFilter('all');setTabState('schedule');},[data?.role,data?.employeeId]);
  const setTab=(next:string)=>{if(next!==tab){setSettingsSnapshot(next==='settings'?workHourSettings(latest.current??{}):null);setTabState(next);}};
@@ -89,7 +91,7 @@ export default function Scheduler(){
    if(!response.ok)throw new Error(updated.error??'Could not load the schedule.');
    setError('');
    if(!initialWeekSelected.current){
-    const savedWeeks=Array.from(new Set([...(updated.shifts??[]).map(shift=>weekOf(shift.date)),...Object.keys(updated.weeks??{})])).sort().reverse();
+    const savedWeeks=allSavedWeeks(updated);
     setWeek(savedWeeks[0]??INITIAL_WEEK);initialWeekSelected.current=true;
    }
    if(latest.current?.version===updated.version&&latest.current?.role===updated.role&&latest.current?.employeeId===updated.employeeId&&latest.current?.userName===updated.userName)return;
@@ -130,7 +132,7 @@ export default function Scheduler(){
      const shift=saved.shifts?.find(shift=>shift.id===shiftId);
      // Only the direct employee buttons may retry. Never replay a note or admin
      // edit, act as a different signed-in employee, or alter a published week.
-     if(quickEligible&&saved.role==='employee'&&saved.employeeId===actor?.employeeId&&shift&&saved.weeks[weekOf(shift.date)]!=='published'){
+     if(quickEligible&&saved.role==='employee'&&saved.employeeId===actor?.employeeId&&shift&&sheetWeekStatus(saved,weekOf(shift.date),shiftSheetId(shift))!=='published'){
       const alreadyDone=payload.action==='request'
        ?saved.requests.some(request=>request.shiftId===shiftId&&request.employeeId===saved.employeeId)
        :!saved.requests.some(request=>request.id===payload.requestId);
@@ -157,7 +159,7 @@ export default function Scheduler(){
   setRequestEmployeeId(shift.employeeId??'none');setMoveId('none');setAllowOverlap(false);setOverrideHourLimits(false);setAdvanced(showAdvanced);
   const noteOwner=current?.role==='admin'?shift.employeeId:current?.employeeId;
   setNote(current?.requests.find(request=>request.shiftId===shift.id&&request.employeeId===noteOwner)?.note??'');
-  setModal({kind:'assignment',shift});
+  setModal({kind:'assignment',shift,sheetId:shiftSheetId(shift)});
  },[]);
  useEffect(()=>{
   const context=(document as any).modelContext;if(!context?.registerTool)return;
@@ -171,29 +173,37 @@ export default function Scheduler(){
  const admin=data?.role==='admin',employee=data?.role==='employee',employees=data?.employees??[];
  const canInteract=admin||employee,readOnly=!canInteract;
  const shifts=data?.shifts??[],requests=data?.requests??[];
- const ownRequests=requests.filter(request=>request.employeeId===data?.employeeId);
- const savedWeeks=Array.from(new Set([...shifts.map(shift=>weekOf(shift.date)),...Object.keys(data?.weeks??{})])).sort().reverse();
+ const sheets=scheduleSheets(data??{}),selectedSheet=sheets.find(sheet=>sheet.id===sheetId)??sheets[0];
+ const selectedSheetId=selectedSheet.id;
+ const sheetShifts=shifts.filter(shift=>shiftSheetId(shift)===selectedSheetId);
+ const sheetShiftIds=new Set(sheetShifts.map(shift=>shift.id));
+ const ownRequests=requests.filter(request=>request.employeeId===data?.employeeId&&sheetShiftIds.has(request.shiftId));
+ const savedWeeks=allSavedWeeks(data??{});
  const calendarWeeks=Array.from(new Set([...savedWeeks,...(jumpTarget?[jumpTarget]:[]),...(!savedWeeks.length&&admin?[week]:[])])).sort().reverse();
  const nextWeek=savedWeeks.length?addDays(savedWeeks[0],7):INITIAL_WEEK;
  const modalWeek=modal?.shift?weekOf(modal.shift.date):modal?.date?weekOf(modal.date):week;
- const modalPublished=data?.weeks?.[modalWeek]==='published';
- const modalWeekShifts=shifts.filter(shift=>weekOf(shift.date)===modalWeek);
+ const modalSheetId=modal?.shift?shiftSheetId(modal.shift):modal?.sheetId??selectedSheetId;
+ const modalSheetName=sheets.find(sheet=>sheet.id===modalSheetId)?.name??'Sheet';
+ const modalPublished=!!data&&sheetWeekStatus(data,modalWeek,modalSheetId)==='published';
+ const modalWeekShifts=shifts.filter(shift=>shiftSheetId(shift)===modalSheetId&&weekOf(shift.date)===modalWeek);
  const modalRequests=requests.filter(request=>modalWeekShifts.some(shift=>shift.id===request.shiftId));
  const activeEmployees=employees.filter(employee=>employee.active);
  const priorityReady=!!data?.priorityConfirmed&&activeEmployees.length>0&&activeEmployees.every(employee=>Number.isSafeInteger(employee.priority)&&employee.priority>0)&&new Set(activeEmployees.map(employee=>employee.priority)).size===activeEmployees.length;
  const hourSettings=workHourSettings(data??{});
  const confirmWeek=typeof confirm?.action.week==='string'?confirm.action.week:week;
- const confirmWeekIssues=admin&&data&&confirm?.action.action==='publish'?weekHourIssues(data,confirmWeek):[];
+ const confirmSheetId=typeof confirm?.action.sheetId==='string'?confirm.action.sheetId:selectedSheetId;
+ const confirmWeekIssues=admin&&data&&confirm?.action.action==='publish'?sheetWeekHourIssues(data,confirmWeek,confirmSheetId):[];
  const assignmentIssues=admin&&data&&modal?.shift&&employeeId!=='none'?assignmentHourIssues(data,modal.shift,employeeId):[];
  const assignmentOverlap=!!(admin&&data&&modal?.shift&&employeeId!=='none'&&data.shifts.some(shift=>shift.id!==modal.shift!.id&&shift.employeeId===employeeId&&overlaps(shift,modal.shift!)));
  const moveTarget=data?.shifts?.find(shift=>shift.id===moveId);
  const moveIssues=admin&&data&&modal?.shift?.employeeId&&moveTarget?assignmentHourIssues(data,moveTarget,modal.shift.employeeId,modal.shift.id):[];
  const copyTarget=modal?.kind==='week'?modal.date??week:week;
- const earlierWeeks=Array.from(new Set((data?.shifts??[]).map(shift=>weekOf(shift.date)))).filter(savedWeek=>savedWeek<copyTarget).sort().reverse();
- const copyTargetHasShifts=(data?.shifts??[]).some(shift=>weekOf(shift.date)===copyTarget);
+ const earlierWeeks=Array.from(new Set(shifts.filter(shift=>shiftSheetId(shift)===modalSheetId).map(shift=>weekOf(shift.date)))).filter(savedWeek=>savedWeek<copyTarget).sort().reverse();
+ const copyTargetHasShifts=shifts.some(shift=>shiftSheetId(shift)===modalSheetId&&weekOf(shift.date)===copyTarget);
+ const copyingWeek=copySource!=='standard'&&copySource!=='blank';
  let copyPreview:ReturnType<typeof planWeekCopy>|null=null,copyPreviewError='';
- if(admin&&data&&modal?.kind==='week'&&copySource!=='standard'){
-  try{copyPreview=planWeekCopy(data,copyTarget,copySource,copyAssignments);}catch(cause){copyPreviewError=(cause as Error).message;}
+ if(admin&&data&&modal?.kind==='week'&&copyingWeek){
+  try{copyPreview=planWeekCopy(data,copyTarget,copySource,copyAssignments,modalSheetId);}catch(cause){copyPreviewError=(cause as Error).message;}
  }
  const copyNeedsOverlap=copyAssignments&&!!copyPreview?.overlapEmployeeIds.length;
  const copyNeedsHours=copyAssignments&&!!copyPreview?.hourIssues.length;
@@ -213,19 +223,19 @@ export default function Scheduler(){
   if(id&&(assignmentHourIssues(current,shift,id).length>0||current.shifts.some(other=>other.id!==shift.id&&other.employeeId===id&&overlaps(other,shift)))){openShift(shift,id,true);return;}
   void act({action:'assign',shiftId:shift.id,employeeId:id});
  };
- const publishWeek=(targetWeek:string)=>{
+ const publishWeek=(targetWeek:string,targetSheetId:string)=>{
   const current=latest.current;if(current?.role!=='admin')return;
-  const isPublished=current.weeks[targetWeek]==='published';
-  if(!isPublished&&weekHourIssues(current,targetWeek).length){setConfirm({title:'Publish with extra hours?',description:`${weekRange(targetWeek)}. Review these limits and approve an exception to publish.`,action:{action:'publish',week:targetWeek,published:true}});return;}
-  void act({action:'publish',week:targetWeek,published:!isPublished});
+  const isPublished=sheetWeekStatus(current,targetWeek,targetSheetId)==='published';
+  if(!isPublished&&sheetWeekHourIssues(current,targetWeek,targetSheetId).length){setConfirm({title:'Publish with extra hours?',description:`${sheets.find(sheet=>sheet.id===targetSheetId)?.name} · ${weekRange(targetWeek)}. Review these limits and approve an exception to publish.`,action:{action:'publish',week:targetWeek,sheetId:targetSheetId,published:true}});return;}
+  void act({action:'publish',week:targetWeek,sheetId:targetSheetId,published:!isPublished});
  };
- const openCreateWeek=(targetWeek:string)=>{
-  if(!admin||(latest.current?.shifts??[]).some(shift=>weekOf(shift.date)===targetWeek))return;
-  const available=Array.from(new Set((latest.current?.shifts??[]).map(shift=>weekOf(shift.date)))).filter(savedWeek=>savedWeek<targetWeek).sort().reverse();
+ const openCreateWeek=(targetWeek:string,targetSheetId:string)=>{
+  if(!admin||(latest.current?.shifts??[]).some(shift=>shiftSheetId(shift)===targetSheetId&&weekOf(shift.date)===targetWeek))return;
+  const available=Array.from(new Set((latest.current?.shifts??[]).filter(shift=>shiftSheetId(shift)===targetSheetId).map(shift=>weekOf(shift.date)))).filter(savedWeek=>savedWeek<targetWeek).sort().reverse();
   const previous=addDays(targetWeek,-7);
-  setWeek(targetWeek);setCopySource(available.includes(previous)?previous:available[0]??'standard');
+  setWeek(targetWeek);setCopySource(available.includes(previous)?previous:available[0]??(targetSheetId===DEFAULT_SHEET_ID?'standard':'blank'));
   setCopyAssignments(false);setCopyAllowOverlap(false);setCopyOverrideHours(false);
-  setModal({kind:'week',date:targetWeek});
+  setModal({kind:'week',date:targetWeek,sheetId:targetSheetId});
  };
  const jumpToWeek=(targetWeek:string)=>{
   setWeek(targetWeek);setJumpTarget(targetWeek);
@@ -237,29 +247,35 @@ export default function Scheduler(){
 
  const schedule=<>
   <div className="simple-page-heading calendar-heading"><h1>Schedule</h1><div className="inline-actions">
-   {admin&&<button className="btn primary" disabled={busy} onClick={()=>openCreateWeek(nextWeek)}><Plus size={16}/> Create next week</button>}
+   {admin&&<button className="btn primary" disabled={busy} onClick={()=>openCreateWeek(nextWeek,selectedSheetId)}><Plus size={16}/> Create next week</button>}
    <button className="btn outline icon-button" aria-label="Refresh schedule" disabled={busy||priorityDirty} onClick={()=>void refresh()}><RefreshCw size={17}/></button>
   </div></div>
+  <div className="sheet-navigation">
+   <div role="tablist" aria-label="Schedule sheets" className="sheet-tabs">{sheets.map((sheet,index)=><button key={sheet.id} type="button" role="tab" id={`sheet-tab-${sheet.id}`} aria-selected={sheet.id===selectedSheetId} aria-controls="sheet-calendar" tabIndex={sheet.id===selectedSheetId?0:-1} data-testid="sheet-tab" data-sheet-id={sheet.id} onClick={()=>setSheetId(sheet.id)} onKeyDown={event=>{const offset=event.key==='ArrowRight'?1:event.key==='ArrowLeft'?-1:0;const next=event.key==='Home'?0:event.key==='End'?sheets.length-1:offset?(index+offset+sheets.length)%sheets.length:-1;if(next>=0){event.preventDefault();setSheetId(sheets[next].id);document.getElementById(`sheet-tab-${sheets[next].id}`)?.focus();}}}>{sheet.name}</button>)}</div>
+   {admin&&<div className="sheet-tools"><button type="button" className="text-button" disabled={busy} onClick={()=>setModal({kind:'sheet'})}><Plus size={16}/> Add sheet</button><button type="button" className="text-button" disabled={busy} onClick={()=>setModal({kind:'sheet',sheet:selectedSheet,sheetId:selectedSheetId})}>Rename sheet</button></div>}
+  </div>
+  <div id="sheet-calendar" role="tabpanel" aria-labelledby={`sheet-tab-${selectedSheetId}`} data-testid="sheet-calendar" data-sheet-id={selectedSheetId}>
   <div className="simple-schedule-toolbar calendar-toolbar">
    <label className="calendar-jump">Jump to week<input type="date" aria-label="Jump to week" value={week} onChange={event=>{if(/^\d{4}-\d{2}-\d{2}$/.test(event.target.value))jumpToWeek(weekOf(event.target.value));}}/></label>
    {employee&&<div className="shift-filters" role="group" aria-label="Show shifts"><button aria-pressed={filter==='all'} onClick={()=>setFilter('all')}>All shifts</button><button aria-pressed={filter==='assigned'} onClick={()=>setFilter('assigned')}>My shifts</button><button aria-pressed={filter==='requested'} onClick={()=>setFilter('requested')}>My requests <span data-testid="request-count">{ownRequests.length}</span></button></div>}
   </div>
-  {canInteract&&savedWeeks.some(savedWeek=>data.weeks[savedWeek]!=='published')&&(!priorityReady?<p className="schedule-hint">Waiting for admin to set priority.{admin&&<> <button className="text-button" onClick={()=>setTab('team')}>Set order</button></>}</p>:employee&&<p className="schedule-hint">Assignments may change until published.</p>)}
+  {canInteract&&sheetShifts.some(shift=>sheetWeekStatus(data,shift.date,selectedSheetId)!=='published')&&(!priorityReady?<p className="schedule-hint">Waiting for admin to set priority.{admin&&<> <button className="text-button" onClick={()=>setTab('team')}>Set order</button></>}</p>:employee&&<p className="schedule-hint">Assignments may change until published.</p>)}
   <div className="calendar-weeks">{calendarWeeks.map(savedWeek=>{
-   const weekShifts=shifts.filter(shift=>weekOf(shift.date)===savedWeek);
+   const weekShifts=sheetShifts.filter(shift=>weekOf(shift.date)===savedWeek);
    const weekShiftIds=new Set(weekShifts.map(shift=>shift.id));
    const weekRequests=requests.filter(request=>weekShiftIds.has(request.shiftId));
-   const isPublished=data.weeks[savedWeek]==='published';
-   const issues=admin?weekHourIssues(data,savedWeek):[];
-   return <section key={savedWeek} id={`week-${savedWeek}`} data-testid="schedule-week" data-week={savedWeek} className="calendar-week" aria-label={`Week of ${weekRange(savedWeek)}`}>
+   const isPublished=sheetWeekStatus(data,savedWeek,selectedSheetId)==='published';
+   const issues=admin?sheetWeekHourIssues(data,savedWeek,selectedSheetId):[];
+   return <section key={savedWeek} id={`week-${savedWeek}`} data-testid="schedule-week" data-week={savedWeek} data-sheet-id={selectedSheetId} className="calendar-week" aria-label={`Week of ${weekRange(savedWeek)}`}>
     <header className="calendar-week-header"><div className="calendar-week-title"><h2>{weekRange(savedWeek)}</h2><span className={'status '+(isPublished?'published':'')}>{isPublished?'Published':'Draft'}</span></div>
-     {admin&&<div className="inline-actions"><button className="btn outline" disabled={busy||!weekShifts.length} onClick={()=>{setWeek(savedWeek);publishWeek(savedWeek);}}>{isPublished?'Reopen':'Publish'}</button><DropdownMenu><DropdownMenuTrigger asChild><button className="btn outline icon-button" aria-label={`More actions for week of ${fmt(savedWeek)}`}><MoreHorizontal size={18}/></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="schedule-menu"><DropdownMenuItem disabled={busy} onSelect={()=>{setWeek(savedWeek);setModal({kind:'shift',date:savedWeek});}}><Plus/> Add shift</DropdownMenuItem><DropdownMenuItem disabled={busy||!weekShifts.length||!priorityReady||isPublished} onSelect={()=>setConfirm({title:'Auto-assign open shifts?',description:`${weekRange(savedWeek)}. Includes shifts you held open. Existing manual and imported assignments stay in place. Work-hour limits still apply.`,action:{action:'auto',week:savedWeek}})}><Sparkles/> Auto-assign</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>}
+     {admin&&<div className="inline-actions"><button className="btn outline" disabled={busy||!weekShifts.length} onClick={()=>{setWeek(savedWeek);publishWeek(savedWeek,selectedSheetId);}}>{isPublished?'Reopen':'Publish'}</button><DropdownMenu><DropdownMenuTrigger asChild><button className="btn outline icon-button" aria-label={`More actions for week of ${fmt(savedWeek)}`}><MoreHorizontal size={18}/></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="schedule-menu"><DropdownMenuItem disabled={busy} onSelect={()=>{setWeek(savedWeek);setModal({kind:'shift',date:savedWeek,sheetId:selectedSheetId});}}><Plus/> Add shift</DropdownMenuItem><DropdownMenuItem disabled={busy||!weekShifts.length||!priorityReady||isPublished} onSelect={()=>setConfirm({title:'Auto-assign open shifts?',description:`${selectedSheet.name} · ${weekRange(savedWeek)}. Includes shifts you held open. Existing manual and imported assignments stay in place. Work-hour limits still apply.`,action:{action:'auto',week:savedWeek,sheetId:selectedSheetId}})}><Sparkles/> Auto-assign</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>}
     </header>
     {!!issues.length&&<p className="schedule-hint"><button className="text-button hours-over" onClick={()=>{setWeek(savedWeek);setTab('settings');}}>{new Set(issues.map(issue=>issue.employeeId)).size} employee(s) over hour limits</button></p>}
-    {weekShifts.length?<ShiftBoard shifts={weekShifts} employees={employees} requests={weekRequests} week={savedWeek} admin={admin} readOnly={readOnly} employeeId={employee?data.employeeId:undefined} published={isPublished} priorityReady={priorityReady} busy={busy} filter={employee?filter:'all'} onRequest={requestShift} onWithdraw={request=>void act({action:'withdraw',requestId:request.id},true)} onOpen={openShift} onAssign={assignShift} onAdd={admin?date=>{setWeek(weekOf(date));setModal({kind:'shift',date});}:undefined}/>:<div className="calendar-empty"><p>No shifts this week.</p>{admin&&<button className="btn primary" disabled={busy||isPublished} onClick={()=>openCreateWeek(savedWeek)}>Create this week</button>}</div>}
+    {weekShifts.length?<ShiftBoard shifts={weekShifts} employees={employees} requests={weekRequests} week={savedWeek} admin={admin} readOnly={readOnly} employeeId={employee?data.employeeId:undefined} published={isPublished} priorityReady={priorityReady} busy={busy} filter={employee?filter:'all'} onRequest={requestShift} onWithdraw={request=>void act({action:'withdraw',requestId:request.id},true)} onOpen={openShift} onAssign={assignShift} onAdd={admin?date=>{setWeek(weekOf(date));setModal({kind:'shift',date,sheetId:selectedSheetId});}:undefined}/>:<div className="calendar-empty"><p>No {selectedSheet.name} shifts this week.</p>{admin&&<div className="inline-actions"><button className="btn primary" disabled={busy} onClick={()=>{setWeek(savedWeek);setModal({kind:'shift',date:savedWeek,sheetId:selectedSheetId});}}>Add shift</button><button className="btn outline" disabled={busy||isPublished} onClick={()=>openCreateWeek(savedWeek,selectedSheetId)}>Create / copy week</button></div>}</div>}
    </section>;
   })}</div>
   {!calendarWeeks.length&&<Blank title="No shifts yet">The schedule will appear here once your admin adds shifts.</Blank>}
+  </div>
  </>;
  const team=<>
   <div className="simple-page-heading"><div><h1>Team</h1><p>Higher rows get first choice. Changes save automatically.</p></div><div className="team-actions"><EmployeeAccessLink compact/><button className="btn primary" disabled={busy} onClick={()=>setModal({kind:'employee'})}><Plus size={16}/> Add employee</button><DropdownMenu><DropdownMenuTrigger asChild><button className="btn outline icon-button" aria-label="More team actions"><MoreHorizontal size={19}/></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={busy||activeEmployees.some(employee=>!employee.hireDate)} onSelect={()=>void savePriority([...activeEmployees].sort((a,b)=>a.hireDate.localeCompare(b.hireDate)||a.name.localeCompare(b.name)).map(employee=>employee.id))}>Order by hire date</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div></div>
@@ -271,27 +287,28 @@ export default function Scheduler(){
 
  return <>{header}<main className="app-shell simple-shell">
   {error&&<div role="alert" className="error-banner">{error} <button className="text-button" onClick={refresh}>Try again</button></div>}
-  {admin?<Tabs value={tab} onValueChange={setTab}><TabsList variant="line" className="main-tabs simple-main-tabs"><TabsTrigger value="schedule"><CalendarDays/> Schedule</TabsTrigger><TabsTrigger value="team"><Users/> Team</TabsTrigger><TabsTrigger value="settings"><Settings/> Settings</TabsTrigger></TabsList><TabsContent value="schedule">{schedule}</TabsContent><TabsContent value="team">{team}</TabsContent><TabsContent value="settings"><div className="simple-page-heading"><h1>Settings</h1><label className="calendar-jump">Hours for week<select aria-label="Hours for week" value={week} onChange={event=>setWeek(event.target.value)}>{Array.from(new Set([week,...savedWeeks])).sort().reverse().map(savedWeek=><option key={savedWeek} value={savedWeek}>{weekRange(savedWeek)}</option>)}</select></label></div>{settingsSnapshot&&(settingsSnapshot.dailyMaxHours!==hourSettings.dailyMaxHours||settingsSnapshot.weeklyMaxHours!==hourSettings.weeklyMaxHours)&&<div className="hours-warning" role="status">Saved limits changed to {hourSettings.dailyMaxHours} hours/day and {hourSettings.weeklyMaxHours} hours/week. Your inputs are preserved.</div>}<WorkHourSettingsPanel settings={settingsSnapshot??hourSettings} employees={employees} shifts={data.shifts} week={week} busy={busy} onSave={async settings=>{const saved=await act({action:'settings',...settings});if(saved)setSettingsSnapshot(workHourSettings(saved));return saved;}}/></TabsContent></Tabs>:schedule}
+  {admin?<Tabs value={tab} onValueChange={setTab}><TabsList variant="line" className="main-tabs simple-main-tabs"><TabsTrigger value="schedule"><CalendarDays/> Schedule</TabsTrigger><TabsTrigger value="team"><Users/> Team</TabsTrigger><TabsTrigger value="settings"><Settings/> Settings</TabsTrigger></TabsList><TabsContent value="schedule">{schedule}</TabsContent><TabsContent value="team">{team}</TabsContent><TabsContent value="settings"><div className="simple-page-heading"><div><h1>Settings</h1><p>Hours across all sheets.</p></div><label className="calendar-jump">Hours for week<select aria-label="Hours for week" value={week} onChange={event=>setWeek(event.target.value)}>{Array.from(new Set([week,...savedWeeks])).sort().reverse().map(savedWeek=><option key={savedWeek} value={savedWeek}>{weekRange(savedWeek)}</option>)}</select></label></div>{settingsSnapshot&&(settingsSnapshot.dailyMaxHours!==hourSettings.dailyMaxHours||settingsSnapshot.weeklyMaxHours!==hourSettings.weeklyMaxHours)&&<div className="hours-warning" role="status">Saved limits changed to {hourSettings.dailyMaxHours} hours/day and {hourSettings.weeklyMaxHours} hours/week. Your inputs are preserved.</div>}<WorkHourSettingsPanel settings={settingsSnapshot??hourSettings} employees={employees} shifts={data.shifts} week={week} busy={busy} onSave={async settings=>{const saved=await act({action:'settings',...settings});if(saved)setSettingsSnapshot(workHourSettings(saved));return saved;}}/></TabsContent></Tabs>:schedule}
  </main>
- <Dialog open={!!modal&&canInteract&&(modal.kind==='assignment'||admin)} onOpenChange={open=>{if(!open)setModal(null);}}><DialogContent className="app-dialog simple-dialog"><DialogHeader><DialogTitle>{modal?.kind==='week'?'Create week':modal?.kind==='assignment'?`${modal.shift?.label} · ${fmt(modal.shift!.date)}`:modal?.kind==='employee'?(modal.employee?'Edit employee':'Add employee'):modal?.kind==='editShift'?'Edit shift':'Add shift'}</DialogTitle><DialogDescription>{modal?.kind==='week'?weekRange(copyTarget):modal?.kind==='assignment'?`${modal.shift?.start}–${modal.shift?.end}${modal.shift&&modal.shift.end<=modal.shift.start?' · ends next day':''}`:modal?.kind==='employee'?'Name and phone sign-in.':'Choose the date and hours.'}</DialogDescription></DialogHeader>
+ <Dialog open={!!modal&&canInteract&&(modal.kind==='assignment'||admin)} onOpenChange={open=>{if(!open)setModal(null);}}><DialogContent className="app-dialog simple-dialog"><DialogHeader><DialogTitle>{modal?.kind==='sheet'?(modal.sheet?'Rename sheet':'Add sheet'):modal?.kind==='week'?'Create week':modal?.kind==='assignment'?`${modal.shift?.label} · ${fmt(modal.shift!.date)}`:modal?.kind==='employee'?(modal.employee?'Edit employee':'Add employee'):modal?.kind==='editShift'?'Edit shift':'Add shift'}</DialogTitle><DialogDescription>{modal?.kind==='sheet'?'Keep shifts organized by hotel category.':modal?.kind==='week'?`${modalSheetName} · ${weekRange(copyTarget)}`:modal?.kind==='assignment'?`${modalSheetName} · ${modal.shift?.start}–${modal.shift?.end}${modal.shift&&modal.shift.end<=modal.shift.start?' · ends next day':''}`:modal?.kind==='employee'?'Name and phone sign-in.':`${modalSheetName} · Choose the date and hours.`}</DialogDescription></DialogHeader>
+  {modal?.kind==='sheet'&&<form className="form-stack" onSubmit={async event=>{event.preventDefault();const name=String(new FormData(event.currentTarget).get('name')??'').trim();const saved=await act({action:'sheet',...(modal.sheet?{id:modal.sheet.id}:{}),name});if(saved){const sheet=scheduleSheets(saved).find(sheet=>modal.sheet?sheet.id===modal.sheet.id:sheet.name===name);if(sheet)setSheetId(sheet.id);setModal(null);}}}><label>Sheet name<input name="name" required maxLength={80} autoFocus defaultValue={modal.sheet?.name}/></label><button className="btn primary" disabled={busy}>{modal.sheet?'Save name':'Add sheet'}</button></form>}
   {modal?.kind==='week'&&<form className="form-stack week-copy-form" onSubmit={event=>{
    event.preventDefault();
-   if(busy||copyTargetHasShifts||copyPreviewError||(copySource!=='standard'&&!copyPreview)||(copyNeedsOverlap&&!copyAllowOverlap)||(copyNeedsHours&&!copyOverrideHours))return;
-   void doAndClose({action:'week',week:copyTarget,...(copySource!=='standard'?{sourceWeek:copySource,copyAssignments,...(copyAssignments?{allowOverlap:copyNeedsOverlap&&copyAllowOverlap,overrideHourLimits:copyNeedsHours&&copyOverrideHours}:{})}:{})});
+   if(busy||copyTargetHasShifts||copyPreviewError||(copyingWeek&&!copyPreview)||(copyNeedsOverlap&&!copyAllowOverlap)||(copyNeedsHours&&!copyOverrideHours))return;
+   void doAndClose({action:'week',week:copyTarget,sheetId:modalSheetId,...(copyingWeek?{sourceWeek:copySource,copyAssignments,...(copyAssignments?{allowOverlap:copyNeedsOverlap&&copyAllowOverlap,overrideHourLimits:copyNeedsHours&&copyOverrideHours}:{})}:{blank:copySource==='blank'})});
   }}>
-   <label>Copy from<Pick label="Copy from" value={copySource} onChange={source=>{setCopySource(source);if(source==='standard')setCopyAssignments(false);}} options={[...earlierWeeks.map(source=>({value:source,label:`${weekRange(source)}${source===addDays(copyTarget,-7)?' (previous week)':''}`})),{value:'standard',label:'Standard shifts'}]}/></label>
-   {copySource!=='standard'&&<label className="checkbox-label"><Checkbox checked={copyAssignments} onCheckedChange={value=>setCopyAssignments(value===true)}/> Include assigned employees</label>}
-   {!copyPreviewError&&<div className="week-copy-preview" data-testid="week-copy-preview"><strong>{copySource==='standard'?'35 standard shifts':`${copyPreview?.shifts.length??0} shifts`}</strong><span>{copySource!=='standard'&&copyAssignments?`${copyPreview?.shifts.filter(shift=>shift.employeeId).length??0} assigned`:'No assignments'}</span></div>}
-   <p className="helper">New draft. Requests start fresh.</p>
+   <label>Copy from<Pick label="Copy from" value={copySource} onChange={source=>{setCopySource(source);if(source==='standard'||source==='blank')setCopyAssignments(false);}} options={[...earlierWeeks.map(source=>({value:source,label:`${weekRange(source)}${source===addDays(copyTarget,-7)?' (previous week)':''}`})),...(modalSheetId===DEFAULT_SHEET_ID?[{value:'standard',label:'Standard shifts'}]:[]),{value:'blank',label:'Blank week'}]}/></label>
+   {copyingWeek&&<label className="checkbox-label"><Checkbox checked={copyAssignments} onCheckedChange={value=>setCopyAssignments(value===true)}/> Include assigned employees</label>}
+   {!copyPreviewError&&<div className="week-copy-preview" data-testid="week-copy-preview"><strong>{copySource==='standard'?'35 standard shifts':copySource==='blank'?'Blank week':`${copyPreview?.shifts.length??0} shifts`}</strong><span>{copyingWeek&&copyAssignments?`${copyPreview?.shifts.filter(shift=>shift.employeeId).length??0} assigned`:'No assignments'}</span></div>}
+   <p className="helper">{copySource==='blank'?'Add your own shifts after creating this week.':'New draft. Requests start fresh.'}</p>
    {!!copyPreview?.unassignedCount&&<p className="helper">{copyPreview.unassignedCount} assignment{copyPreview.unassignedCount===1?'':'s'} will be left open because the employee is inactive or no longer on the team.</p>}
    {copyNeedsOverlap&&<div className="hours-warning week-copy-warning"><p>Overlapping shifts for {copyPreview!.overlapEmployeeIds.map(name).join(', ')}.</p><label className="checkbox-label"><Checkbox checked={copyAllowOverlap} onCheckedChange={value=>setCopyAllowOverlap(value===true)}/> Allow overlapping duties in this week</label></div>}
    {copyNeedsHours&&<div className="hours-warning week-copy-warning"><strong>Work-hour limits exceeded</strong><ul className="week-copy-issues">{copyPreview!.hourIssues.map(issue=><li key={issue.employeeId+issue.kind+issue.period}>{name(issue.employeeId)}: {hourIssueText(issue)}</li>)}</ul><label className="checkbox-label"><Checkbox checked={copyOverrideHours} onCheckedChange={value=>setCopyOverrideHours(value===true)}/> Admin override: allow copied assignments to exceed work-hour limits</label></div>}
    {copyPreviewError&&<p className="week-copy-error" role="alert">{copyPreviewError}</p>}
    {copyTargetHasShifts&&<p className="week-copy-error" role="alert">This week already has shifts. Close this dialog to view them.</p>}
-   <button className="btn primary" type="submit" disabled={busy||copyTargetHasShifts||!!copyPreviewError||(copySource!=='standard'&&!copyPreview)||(copyNeedsOverlap&&!copyAllowOverlap)||(copyNeedsHours&&!copyOverrideHours)}>{busy?'Creating…':'Create week'}</button>
+   <button className="btn primary" type="submit" disabled={busy||copyTargetHasShifts||!!copyPreviewError||(copyingWeek&&!copyPreview)||(copyNeedsOverlap&&!copyAllowOverlap)||(copyNeedsHours&&!copyOverrideHours)}>{busy?'Creating…':'Create week'}</button>
   </form>}
   {modal?.kind==='employee'&&<form className="form-stack" onSubmit={event=>{event.preventDefault();const fields=new FormData(event.currentTarget);void doAndClose({action:'employee',id:modal.employee?.id,name:fields.get('name'),hireDate:fields.get('hireDate'),phone:fields.get('phone')});}}><label>Name<input required name="name" maxLength={80} defaultValue={modal.employee?.name}/></label><label>Phone<input type="tel" name="phone" autoComplete="tel" maxLength={50} defaultValue={modal.employee?.phone} placeholder="(604) 555-0123"/></label><p className="helper">Use 10 digits for US/Canada or +country code. Leave blank to disable sign-in.</p><details className="advanced-options"><summary>More details</summary><label>Hire date<input type="date" name="hireDate" defaultValue={modal.employee?.hireDate}/></label></details><button className="btn primary" disabled={busy}>Save employee</button></form>}
-  {(modal?.kind==='shift'||modal?.kind==='editShift')&&<form className="form-stack" onSubmit={event=>{event.preventDefault();const fields=new FormData(event.currentTarget);void doAndClose({action:'shift',id:modal.shift?.id,label:fields.get('label'),date:fields.get('date'),start:fields.get('start'),end:fields.get('end')});}}><label>Shift name<input name="label" required defaultValue={modal.shift?.label??'Morning'}/></label><label>Date<input type="date" name="date" required defaultValue={modal.shift?.date??modal.date??week}/></label><div className="form-row"><label>Start<input type="time" name="start" required defaultValue={modal.shift?.start??'07:30'}/></label><label>End<input type="time" name="end" required defaultValue={modal.shift?.end??'13:00'}/></label></div><p className="helper">An earlier end time means the next day.</p><button className="btn primary" disabled={busy}>Save shift</button></form>}
+  {(modal?.kind==='shift'||modal?.kind==='editShift')&&<form className="form-stack" onSubmit={event=>{event.preventDefault();const fields=new FormData(event.currentTarget);void doAndClose({action:'shift',id:modal.shift?.id,sheetId:modalSheetId,label:fields.get('label'),date:fields.get('date'),start:fields.get('start'),end:fields.get('end')});}}><label>Shift name<input name="label" required defaultValue={modal.shift?.label??(modalSheetId===DEFAULT_SHEET_ID?'Morning':'')}/></label><label>Date<input type="date" name="date" required defaultValue={modal.shift?.date??modal.date??week}/></label><div className="form-row"><label>Start<input type="time" name="start" required defaultValue={modal.shift?.start??(modalSheetId===DEFAULT_SHEET_ID?'07:30':'')}/></label><label>End<input type="time" name="end" required defaultValue={modal.shift?.end??(modalSheetId===DEFAULT_SHEET_ID?'13:00':'')}/></label></div><p className="helper">An earlier end time means the next day.</p><button className="btn primary" disabled={busy}>Save shift</button></form>}
   {modal?.kind==='assignment'&&<div className="form-stack">
    <RequestQueue requests={modalRequests.filter(request=>request.shiftId===modal.shift!.id)} employees={employees} shift={modal.shift!} published={modalPublished} priorityReady={priorityReady} admin={admin} busy={busy} currentEmployeeId={data.employeeId} onWithdraw={request=>void act({action:'withdraw',requestId:request.id})}/>
    {admin?<>
@@ -304,7 +321,7 @@ export default function Scheduler(){
      {!modal.shift!.employeeId&&modal.shift!.requestAssignmentLocked&&<p className="helper">Held open. Auto-assign includes this shift again.</p>}
      {modal.shift!.employeeId&&<><label>Move assignment<Pick label="Move to open shift" value={moveId} onChange={setMoveId} options={[{value:'none',label:'Choose an open shift'},...modalWeekShifts.filter(shift=>!shift.employeeId&&shift.id!==modal.shift!.id).map(shift=>({value:shift.id,label:`${fmt(shift.date)} · ${shift.label} (${shift.start})`}))]}/></label>{moveIssues.length>0&&<div className="hours-warning"><ul>{moveIssues.map(issue=><li key={issue.kind+issue.period}>{hourIssueText(issue)}</li>)}</ul></div>}<button className="btn outline" disabled={busy||moveId==='none'} onClick={()=>doAndClose({action:'move',fromId:modal.shift!.id,toId:moveId,allowOverlap,overrideHourLimits})}>Move assignment</button></>}
      {!modalPublished&&<details className="record-request"><summary>Record a request</summary><div className="form-stack"><Pick label="Employee requesting shift" value={requestEmployeeId} onChange={id=>{setRequestEmployeeId(id);setNote(data.requests.find(request=>request.shiftId===modal.shift!.id&&request.employeeId===id)?.note??'');}} options={[{value:'none',label:'Choose employee'},...activeEmployees.map(employee=>({value:employee.id,label:employee.name}))]}/><label>Private note<textarea value={note} onChange={event=>setNote(event.target.value)} maxLength={300}/></label><button className="btn outline" disabled={busy||requestEmployeeId==='none'} onClick={()=>doAndClose({action:'request',shiftId:modal.shift!.id,employeeId:requestEmployeeId,note})}>Save request</button></div></details>}
-     <div className="shift-detail-actions"><button className="text-button" disabled={!!modal.shift!.employeeId} onClick={()=>setModal({kind:'editShift',shift:modal.shift})}>Edit date / time</button><button className="text-button danger" disabled={!!modal.shift!.employeeId} onClick={()=>setConfirm({title:'Remove this shift?',description:'The shift and its requests will be removed.',action:{action:'deleteShift',shiftId:modal.shift!.id}})}>Remove shift</button></div>{modal.shift!.employeeId&&<p className="helper">Unassign before editing or removing.</p>}
+     <div className="shift-detail-actions"><button className="text-button" disabled={!!modal.shift!.employeeId} onClick={()=>setModal({kind:'editShift',shift:modal.shift,sheetId:modalSheetId})}>Edit date / time</button><button className="text-button danger" disabled={!!modal.shift!.employeeId} onClick={()=>setConfirm({title:'Remove this shift?',description:'The shift and its requests will be removed.',action:{action:'deleteShift',shiftId:modal.shift!.id}})}>Remove shift</button></div>{modal.shift!.employeeId&&<p className="helper">Unassign before editing or removing.</p>}
     </div></details>
     <button className="btn primary" disabled={busy||(assignmentOverlap&&!allowOverlap)||(assignmentIssues.length>0&&!overrideHourLimits)} onClick={()=>doAndClose({action:'assign',shiftId:modal.shift!.id,employeeId:employeeId==='none'?null:employeeId,allowOverlap,overrideHourLimits})}>Save assignment</button>
    </>:employee&&!modalPublished?<>

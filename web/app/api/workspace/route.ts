@@ -2,7 +2,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { normalizePhone } from '@/lib/phone';
 import { isSameOriginRequest } from '@/app/auth/origin';
 import { createState, readState, commitState } from '@/lib/storage';
-import { State, Shift, INITIAL_WEEK, weekOf, addDays, conflict, rankedRequests, reconcileRequestAssignments, planWeekCopy, workHourSettings, assignmentHourIssues, weekHourIssues, hourIssueText } from '@/lib/schedule';
+import { State, Shift, INITIAL_WEEK, DEFAULT_SHEET_ID, scheduleSheets, shiftSheetId, weeksForSheet, sheetWeekStatus, setSheetWeekStatus, sheetWeekHourIssues, weekOf, addDays, conflict, rankedRequests, reconcileRequestAssignments, planWeekCopy, workHourSettings, assignmentHourIssues, hourIssueText } from '@/lib/schedule';
 import imported from '@/lib/imported.json';
 import { z } from 'zod';
 export const dynamic='force-dynamic';
@@ -16,16 +16,17 @@ const input=z.discriminatedUnion('action',[
  z.object({action:z.literal('setup')}),
  z.object({action:z.literal('employee'),id:z.string().optional(),name:txt,hireDate:z.union([date,z.literal('')]),phone:z.string().trim().max(50).optional()}),
  z.object({action:z.literal('priority'),ids:z.array(txt).max(200)}),
+ z.object({action:z.literal('sheet'),id:txt.optional(),name:txt}),
  z.object({action:z.literal('settings'),dailyMaxHours:z.number().min(0.25).max(24).multipleOf(0.25),weeklyMaxHours:z.number().min(0.25).max(168).multipleOf(0.25)}),
  z.object({action:z.literal('assign'),shiftId:txt,employeeId:z.string().nullable(),allowOverlap:z.boolean().optional(),overrideHourLimits:z.boolean().optional()}),
  z.object({action:z.literal('move'),fromId:txt,toId:txt,allowOverlap:z.boolean().optional(),overrideHourLimits:z.boolean().optional()}),
- z.object({action:z.literal('shift'),id:z.string().optional(),date,start:time,end:time,label:txt}),
+ z.object({action:z.literal('shift'),id:z.string().optional(),date,start:time,end:time,label:txt,sheetId:txt.optional()}),
  z.object({action:z.literal('deleteShift'),shiftId:txt}),
  z.object({action:z.literal('request'),shiftId:txt,note:z.string().trim().max(300),employeeId:z.string().optional()}),
  z.object({action:z.literal('withdraw'),requestId:txt}),
- z.object({action:z.literal('auto'),week:date}),
- z.object({action:z.literal('week'),week:date,sourceWeek:date.optional(),copyAssignments:z.boolean().optional(),allowOverlap:z.boolean().optional(),overrideHourLimits:z.boolean().optional()}),
- z.object({action:z.literal('publish'),week:date,published:z.boolean(),overrideHourLimits:z.boolean().optional()}),
+ z.object({action:z.literal('auto'),week:date,sheetId:txt.optional()}),
+ z.object({action:z.literal('week'),week:date,sheetId:txt.optional(),blank:z.boolean().optional(),sourceWeek:date.optional(),copyAssignments:z.boolean().optional(),allowOverlap:z.boolean().optional(),overrideHourLimits:z.boolean().optional()}),
+ z.object({action:z.literal('publish'),week:date,sheetId:txt.optional(),published:z.boolean(),overrideHourLimits:z.boolean().optional()}),
 ]);
 function fail(message:string,status=400):never { throw Object.assign(new Error(message),{status}); }
 const json=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
@@ -33,21 +34,26 @@ function canSetUpWorkspace(user:CurrentUser) {
  const adminEmail=process.env.ADMIN_EMAIL?.trim().toLowerCase();
  return user.authType==='email'&&!!adminEmail&&user.emailVerified===true&&user.email.trim().toLowerCase()===adminEmail;
 }
+function calendarSheets(state:State|null) {
+ const source:Pick<State,'weeks'|'sheets'|'sheetWeeks'>=state??{weeks:{}},sheets=scheduleSheets(source);
+ const cleanWeeks=(sheetId:string)=>Object.fromEntries(Object.entries(weeksForSheet(source,sheetId)).filter(([week,status])=>date.safeParse(week).success&&(status==='draft'||status==='published')));
+ return {sheets,weeks:cleanWeeks(DEFAULT_SHEET_ID),sheetWeeks:Object.fromEntries(sheets.filter(sheet=>sheet.id!==DEFAULT_SHEET_ID).map(sheet=>[sheet.id,cleanWeeks(sheet.id)]))};
+}
 function publicView(state:State|null,version:number) {
  const assignedIds=new Set(state?.shifts.flatMap(shift=>shift.employeeId?[shift.employeeId]:[])??[]);
  return {role:'public',userName:'',version,priorityConfirmed:false,notes:[],requests:[],settings:workHourSettings({}),
-  weeks:Object.fromEntries(Object.entries(state?.weeks??{}).filter(([week,status])=>/^\d{4}-\d{2}-\d{2}$/.test(week)&&(status==='draft'||status==='published'))),
+  ...calendarSheets(state),
   employees:state?.employees.filter(employee=>assignedIds.has(employee.id)).map(employee=>({id:employee.id,name:employee.name,hireDate:'',priority:0,active:true}))??[],
-  shifts:state?.shifts.map(shift=>({id:shift.id,date:shift.date,start:shift.start,end:shift.end,label:shift.label,employeeId:shift.employeeId,source:shift.source}))??[]};
+  shifts:state?.shifts.map(shift=>({id:shift.id,date:shift.date,start:shift.start,end:shift.end,label:shift.label,employeeId:shift.employeeId,source:shift.source,sheetId:shiftSheetId(shift)}))??[]};
 }
 function view(state:State|null,version:number,user:CurrentUser|null) {
  if(!user)return publicView(state,version);
  if(!state) return canSetUpWorkspace(user)?{role:'setup',version,userName:user.displayName}:publicView(state,version);
  const admin=canSetUpWorkspace(user)&&state.ownerId===user.userId; const employee=user.authType==='phone'?state.employees.find(e=>e.id===user.employeeId&&e.phone&&e.phoneVersion===user.phoneVersion&&e.active):undefined;
  if(!admin&&!employee) return publicView(state,version);
- return {role:admin?'admin':'employee',userName:user.displayName,employeeId:employee?.id,version,priorityConfirmed:state.priorityConfirmed,notes:admin?state.notes:[],weeks:state.weeks,settings:workHourSettings(state),
+ return {role:admin?'admin':'employee',userName:user.displayName,employeeId:employee?.id,version,priorityConfirmed:state.priorityConfirmed,notes:admin?state.notes:[],...calendarSheets(state),settings:workHourSettings(state),
   employees:state.employees.map(e=>({id:e.id,name:e.name,active:e.active,hireDate:admin?e.hireDate:'',priority:e.priority,phone:admin?(e.phone??''):undefined,connected:admin?!!e.phone:undefined})),
-  shifts:state.shifts.map(s=>admin?s:{id:s.id,date:s.date,start:s.start,end:s.end,label:s.label,employeeId:s.employeeId,source:s.source,hourLimitOverride:s.hourLimitOverride,requestAssignmentLocked:s.requestAssignmentLocked}),
+  shifts:state.shifts.map(s=>admin?{...s,sheetId:shiftSheetId(s)}:{id:s.id,date:s.date,start:s.start,end:s.end,label:s.label,employeeId:s.employeeId,source:s.source,sheetId:shiftSheetId(s),hourLimitOverride:s.hourLimitOverride,requestAssignmentLocked:s.requestAssignmentLocked}),
   requests:rankedRequests(state).filter(r=>state.shifts.some(s=>s.id===r.shiftId)).map(r=>({id:r.id,shiftId:r.shiftId,employeeId:r.employeeId,createdAt:r.createdAt,note:admin||r.employeeId===employee!.id?r.note:''}))};
 }
 async function currentUserOrNull():Promise<CurrentUser|null> {
@@ -78,8 +84,18 @@ export async function POST(req:Request){try{
  let message='Changes saved.';
  const getShift=(id:string)=>{const s=state.shifts.find(s=>s.id===id);if(!s)fail('Shift no longer exists.',404);return s;};
  const getEmployee=(id:string)=>{const e=state.employees.find(e=>e.id===id&&e.active);if(!e)fail('Employee not found.',404);return e;};
- const markDraft=(s:Shift)=>{state.weeks[weekOf(s.date)]='draft';};
+ const requireSheet=(id:string)=>{if(!scheduleSheets(state).some(sheet=>sheet.id===id))fail('Schedule sheet not found.',404);return id;};
+ const sheetId=a.action==='shift'||a.action==='week'||a.action==='auto'||a.action==='publish'?requireSheet(a.sheetId??(a.action==='shift'&&a.id?shiftSheetId(getShift(a.id)):DEFAULT_SHEET_ID)):DEFAULT_SHEET_ID;
+ const markDraft=(s:Shift)=>{setSheetWeekStatus(state,s.date,shiftSheetId(s),'draft');};
  switch(a.action){
+ case 'sheet':{
+  const sheets=scheduleSheets(state);
+  if(a.id&&!sheets.some(sheet=>sheet.id===a.id))fail('Schedule sheet not found.',404);
+  if(sheets.some(sheet=>sheet.id!==a.id&&sheet.name.toLowerCase()===a.name.toLowerCase()))fail('A sheet with that name already exists.',409);
+  if(a.id)state.sheets=sheets.map(sheet=>sheet.id===a.id?{id:sheet.id,name:a.name}:sheet);
+  else {if(sheets.length>=20)fail('Sheet limit reached.');state.sheets=[...sheets,{id:crypto.randomUUID(),name:a.name}];}
+  message=a.id?'Sheet renamed.':'Sheet created.';break;
+ }
  case 'employee':{
   if(a.hireDate&&a.hireDate>new Date().toISOString().slice(0,10))fail('Hire date cannot be in the future.');
   const previous=a.id?getEmployee(a.id):undefined;
@@ -116,31 +132,32 @@ export async function POST(req:Request){try{
  }
  case 'shift':{
   if(a.start===a.end)fail('Start and end times must differ.');
-  if(a.id){const s=getShift(a.id);if(s.employeeId)fail('Unassign this shift before changing its time.');if(state.requests.some(r=>r.shiftId===s.id))fail('Withdraw existing requests before changing this shift. Employees requested the original hours.');markDraft(s);Object.assign(s,{date:a.date,start:a.start,end:a.end,label:a.label});markDraft(s);}
-  else{if(state.shifts.length>=10000)fail('Schedule limit reached.');const s={id:crypto.randomUUID(),date:a.date,start:a.start,end:a.end,label:a.label,employeeId:null,source:'manual'};state.shifts.push(s);markDraft(s);}break;
+  if(a.id){const s=getShift(a.id);if(a.sheetId!==undefined&&a.sheetId!==shiftSheetId(s))fail('A shift cannot be moved to another sheet through an edit.');if(s.employeeId)fail('Unassign this shift before changing its time.');if(state.requests.some(r=>r.shiftId===s.id))fail('Withdraw existing requests before changing this shift. Employees requested the original hours.');markDraft(s);Object.assign(s,{date:a.date,start:a.start,end:a.end,label:a.label});markDraft(s);}
+  else{if(state.shifts.length>=10000)fail('Schedule limit reached.');const s={id:crypto.randomUUID(),date:a.date,start:a.start,end:a.end,label:a.label,employeeId:null,source:'manual',sheetId};state.shifts.push(s);markDraft(s);}break;
  }
  case 'deleteShift':{const s=getShift(a.shiftId);if(s.employeeId)fail('Unassign this shift before removing it.');state.shifts=state.shifts.filter(x=>x.id!==s.id);state.requests=state.requests.filter(r=>r.shiftId!==s.id);markDraft(s);break;}
  case 'request':{
-  const s=getShift(a.shiftId);if(state.weeks[weekOf(s.date)]==='published')fail('This week is published. Ask your admin to reopen it.');
+  const s=getShift(a.shiftId);if(sheetWeekStatus(state,s.date,shiftSheetId(s))==='published')fail('This week is published. Ask your admin to reopen it.');
   const employeeId=admin?a.employeeId:me!.id;if(!employeeId)fail('Choose an employee.');getEmployee(employeeId);
   const existing=state.requests.find(r=>r.shiftId===s.id&&r.employeeId===employeeId);
   if(existing)existing.note=a.note;else state.requests.push({id:crypto.randomUUID(),shiftId:s.id,employeeId,createdAt:new Date().toISOString(),note:a.note});message='Shift request saved.';break;
  }
- case 'withdraw':{const r=state.requests.find(r=>r.id===a.requestId);if(!r)fail('Request not found.',404);if(!admin&&r.employeeId!==me!.id)fail('This is not your request.',403);if(state.weeks[weekOf(getShift(r.shiftId).date)]==='published')fail('Published requests cannot be withdrawn.');state.requests=state.requests.filter(x=>x.id!==r.id);message='Request withdrawn.';break;}
- case 'auto':{if(!state.priorityConfirmed)fail('Set and save the priority order first.');if(state.weeks[a.week]==='published')fail('Reopen this week before updating automatic assignments.');for(const s of state.shifts)if(weekOf(s.date)===a.week&&!s.employeeId)s.requestAssignmentLocked=false;state.weeks[a.week]='draft';message='Request assignments refreshed by priority. Manual assignments and work-hour limits were respected.';break;}
+ case 'withdraw':{const r=state.requests.find(r=>r.id===a.requestId);if(!r)fail('Request not found.',404);if(!admin&&r.employeeId!==me!.id)fail('This is not your request.',403);const s=getShift(r.shiftId);if(sheetWeekStatus(state,s.date,shiftSheetId(s))==='published')fail('Published requests cannot be withdrawn.');state.requests=state.requests.filter(x=>x.id!==r.id);message='Request withdrawn.';break;}
+ case 'auto':{const w=weekOf(a.week);if(!state.priorityConfirmed)fail('Set and save the priority order first.');if(sheetWeekStatus(state,w,sheetId)==='published')fail('Reopen this week before updating automatic assignments.');for(const s of state.shifts)if(weekOf(s.date)===w&&shiftSheetId(s)===sheetId&&!s.employeeId)s.requestAssignmentLocked=false;setSheetWeekStatus(state,w,sheetId,'draft');message='Request assignments refreshed by priority. Manual assignments and work-hour limits were respected.';break;}
  case 'week':{
   const w=weekOf(a.week);
-  if(state.shifts.some(s=>weekOf(s.date)===w))fail('This week already has shifts. Choose an empty week.',409);
-  if(state.weeks[w]==='published')fail('This week is already published. Reopen it before adding shifts.',409);
+  if(state.shifts.some(s=>weekOf(s.date)===w&&shiftSheetId(s)===sheetId))fail('This week already has shifts. Choose an empty week.',409);
+  if(sheetWeekStatus(state,w,sheetId)==='published')fail('This week is already published. Reopen it before adding shifts.',409);
+  if(a.blank&&a.sourceWeek)fail('Choose either a blank week or a source week to copy.');
   if(a.copyAssignments&&!a.sourceWeek)fail('Choose a source week before copying employee assignments.');
   let additions:Shift[];
   if(a.sourceWeek){
    const source=weekOf(a.sourceWeek);
    if(source>=w)fail('Choose a source week earlier than the new week.');
-   const count=state.shifts.filter(s=>weekOf(s.date)===source).length;
+   const count=state.shifts.filter(s=>weekOf(s.date)===source&&shiftSheetId(s)===sheetId).length;
    if(!count)fail('The source week has no shifts to copy.');
    if(state.shifts.length+count>10000)fail('Schedule limit reached. This week would exceed 10,000 shifts.');
-   const plan=planWeekCopy(state,w,source,a.copyAssignments===true);
+   const plan=planWeekCopy(state,w,source,a.copyAssignments===true,sheetId);
    if(plan.overlapEmployeeIds.length&&!a.allowOverlap)fail('Copied assignments would overlap other shifts. Review the overlaps and explicitly approve compatible duties.',422);
    if(plan.hourIssues.length&&!a.overrideHourLimits)fail('Copied assignments exceed work-hour limits: '+plan.hourIssues.map(hourIssueText).join('; ')+'. Review them and explicitly approve extra hours.',422);
    additions=plan.shifts.map(shift=>({...shift,id:crypto.randomUUID()}));
@@ -151,20 +168,22 @@ export async function POST(req:Request){try{
    const assigned=additions.filter(shift=>shift.employeeId).length;
    message=`${additions.length} shifts copied to a new draft week${a.copyAssignments?` with ${assigned} assignment${assigned===1?'':'s'}`:''}.`;
    if(plan.unassignedCount)message+=` ${plan.unassignedCount} shift${plan.unassignedCount===1?' was':'s were'} left unassigned because the employee is missing or inactive.`;
+  } else if(a.blank||sheetId!==DEFAULT_SHEET_ID) {
+   additions=[];message='New blank draft week created.';
   } else {
    if(state.shifts.length+35>10000)fail('Schedule limit reached. This week would exceed 10,000 shifts.');
    const templates=[['Morning','07:30','13:00'],['Afternoon','13:00','17:00'],['Evening','17:00','22:00'],['Hotel cleaning','17:30','20:30'],['Overnight','22:00','06:00']];
    additions=[];
-   for(let i=0;i<7;i++)for(const [label,start,end] of templates)additions.push({id:crypto.randomUUID(),date:addDays(w,i),label,start,end,employeeId:null,source:'template'});
+   for(let i=0;i<7;i++)for(const [label,start,end] of templates)additions.push({id:crypto.randomUUID(),date:addDays(w,i),label,start,end,employeeId:null,source:'template',sheetId});
    message='New draft week created with your five shift types.';
   }
-  state.shifts.push(...additions);state.weeks[w]='draft';break;
+  state.shifts.push(...additions);setSheetWeekStatus(state,w,sheetId,'draft');break;
  }
- case 'publish':{if(!state.shifts.some(s=>weekOf(s.date)===a.week))fail('Create shifts before publishing.');if(a.published){reconcileRequestAssignments(state);const issues=weekHourIssues(state,a.week);if(issues.length&&!a.overrideHourLimits)fail('This schedule exceeds work-hour limits. Review the flagged employees and explicitly approve an admin override before publishing.',422);}state.weeks[a.week]=a.published?'published':'draft';message=a.published?'Schedule published to employees.':'Week reopened for requests and edits.';break;}
+ case 'publish':{const w=weekOf(a.week);if(!state.shifts.some(s=>weekOf(s.date)===w&&shiftSheetId(s)===sheetId))fail('Create shifts before publishing.');if(a.published){reconcileRequestAssignments(state);const issues=sheetWeekHourIssues(state,w,sheetId);if(issues.length&&!a.overrideHourLimits)fail('This schedule exceeds work-hour limits. Review the flagged employees and explicitly approve an admin override before publishing.',422);}setSheetWeekStatus(state,w,sheetId,a.published?'published':'draft');message=a.published?'Schedule published to employees.':'Week reopened for requests and edits.';break;}
  }
  // Creating a week does not revise the existing schedule. Copied assignments
  // were checked against every existing shift, including adjacent weeks.
- if(a.action!=='week')reconcileRequestAssignments(state);
+ if(a.action!=='week'&&a.action!=='sheet')reconcileRequestAssignments(state);
  if(a.action==='request'){
   const s=getShift(a.shiftId),requester=admin?a.employeeId:me!.id;
   message=!state.priorityConfirmed?'Request saved. Your admin needs to save the priority order.':s.source==='request-priority'&&s.employeeId===requester?'Request saved and provisionally assigned by priority.':'Request saved in the priority queue.';
