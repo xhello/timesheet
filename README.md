@@ -1,125 +1,108 @@
-# TimeSheet - Face Verification Time Tracking
+# Shiftboard — Timesheet replacement
 
-A modern web application for businesses to track employee clock in/out with face verification. Built with Next.js, face-api.js for face recognition, and Supabase for the backend.
+Employee shift scheduling built with Next.js, TypeScript, Supabase Auth, and Supabase Postgres. The application lives in `web/` so the existing Timesheet Vercel project can keep **Root Directory: `web`**. It is intended to reuse the Timesheet Supabase project.
 
-## Features
+The prepared branch is `codex/replace-with-scheduler`, based on Timesheet commit `f9e735c`. The original Timesheet checkout and its uncommitted changes were left untouched. Preparing this branch does not upload code, deploy the application, or migrate a live database. The Bitbucket repository URL and production app URL must be confirmed before publishing.
 
-- **Face Verification**: Employees clock in/out using face recognition via webcam
-- **Business Registration**: Auto-generated unique business codes
-- **Employee Management**: Register employees with face enrollment
-- **Real-time Recognition**: Instant face matching against registered employees
-- **Email Notifications**: Business codes sent via email (Resend)
+## Included
 
-## Tech Stack
+- Sunday–Saturday Front Desk schedule, including overnight and hotel-cleaning shifts.
+- Employee shift preferences, custom admin priority, and optional hire-date seniority sorting.
+- Automatic assignment plus manual assignment and drag/move controls.
+- Configurable daily/weekly limits, defaulting to 8 and 40 hours, with explicit admin overrides.
+- Email/password accounts, verified-email admin setup, and one-use employee joining codes.
+- Copyable invitations containing the deployment URL, joining code, and instructions.
+- Server-side authorization, private database access, and optimistic concurrency checks.
 
-- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS
-- **Face Recognition**: face-api.js (TensorFlow.js based)
-- **Backend**: Supabase (PostgreSQL, Authentication)
-- **Email**: Resend API
+## Connect the Timesheet Supabase project
 
-## Requirements
+Confirm the saved Timesheet connection points to the intended active project. Obtain its public API key and its **server-only service-role key** from Supabase project settings.
 
-- Node.js 18+
-- Supabase account
-- Resend account (for email)
+Run only `supabase/migrations/0001_workspace.sql` from this repository in that project's SQL Editor. This additive migration creates `public.schedule_workspace`; it does not change Timesheet attendance tables or import their records. Apply it once. If the table already exists, inspect its schema and data before making changes.
 
-## Setup
+The scheduling table enables Row Level Security and revokes access from anonymous and authenticated browser clients. The server accesses it using the service role and enforces application permissions. Existing Timesheet tables and their policies remain unchanged.
 
-### 1. Supabase Setup
+The old destructive `supabase/schema.sql` was removed from this branch and remains in Git history at `f9e735c`. **Do not run it against the reused database:** it drops Timesheet tables with `CASCADE`.
 
-1. Create a new project at [supabase.com](https://supabase.com)
-2. Run the SQL schema from `supabase/schema.sql` in the SQL Editor
-3. Copy your project URL and anon key
+In Supabase Authentication:
 
-### 2. Environment Variables
+1. Enable email/password accounts and email confirmation.
+2. Configure production SMTP for confirmation and password-reset emails. The former app's `RESEND_API_KEY` environment variable does not configure Supabase Auth email delivery. See the [Supabase SMTP guide](https://supabase.com/docs/guides/auth/auth-smtp).
+3. Set the Site URL to the confirmed production app URL. Allow that exact origin's `/auth/callback` and `/auth/confirm` URLs, plus `http://localhost:3000/auth/callback` and `http://localhost:3000/auth/confirm` for local development.
 
-Create a `.env.local` file in the `web/` directory:
+For confirmation links that work across devices, use `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email` in the Confirm signup email template. Use `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery` in Reset password. The app also supports PKCE callback links.
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-RESEND_API_KEY=your_resend_api_key
-```
+## Configure and check the application
 
-### 3. Install Dependencies
+Use Node.js 24. Copy `web/.env.example` to `web/.env.local` if a local configuration file does not already exist, then fill in:
 
-```bash
+| Variable | Value to configure |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | The existing Timesheet Supabase project's active URL. |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | That project's public API key. The existing `NEXT_PUBLIC_SUPABASE_ANON_KEY` variable is also supported. |
+| `SUPABASE_SERVICE_ROLE_KEY` | That same project's server-only service-role key. Never prefix it with `NEXT_PUBLIC_`. |
+| `ADMIN_EMAIL` | The email of the administrator who will verify their account and initialize the workspace. |
+| `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` locally; the confirmed HTTPS app URL in production. |
+
+Never commit `web/.env.local`, service-role keys, or deployment credentials. A successful build without these values does not establish a working database or sign-in flow.
+
+From the repository root:
+
+```sh
 cd web
-npm install
-```
-
-### 4. Run Development Server
-
-```bash
+nvm use
+npm ci
+npm test
+npm run build
+npm run typecheck
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open `http://localhost:3000`. Full integration verification requires the configured database, migration, and Auth settings. Check verified admin setup, an employee joining with a fresh code, shift requests, priority assignment, hour-limit enforcement and override, sign-out, and password reset. Use designated test accounts for onboarding checks.
 
-## Project Structure
+## Upload to Bitbucket and replace the Vercel app
 
-```
-timesheet/
-├── supabase/
-│   └── schema.sql          # Database schema
-└── web/
-    ├── public/
-    │   └── models/         # Face detection ML models
-    ├── src/
-    │   ├── app/
-    │   │   ├── api/
-    │   │   │   └── send-email/  # Email API route
-    │   │   ├── layout.tsx
-    │   │   └── page.tsx
-    │   ├── components/
-    │   │   ├── BusinessLogin.tsx
-    │   │   ├── BusinessSignUp.tsx
-    │   │   ├── ClockInOut.tsx
-    │   │   ├── EmployeeHome.tsx
-    │   │   ├── ForgotBusinessID.tsx
-    │   │   └── SignUpEmployee.tsx
-    │   └── lib/
-    │       ├── faceDetection.ts  # Face recognition logic
-    │       └── supabase.ts       # Database client
-    └── package.json
+Obtain the actual clone URL of the intended Bitbucket Timesheet repository first. Inspect existing remotes with `git remote -v`; add a separate `bitbucket` remote only if it is not already configured. Replace the placeholder below with the confirmed URL:
+
+```sh
+git remote add bitbucket <confirmed-timesheet-clone-url>
+git fetch bitbucket
+git log --oneline --all --decorate -20
 ```
 
-## How It Works
+Review the remote history and reconcile any differences. Commit the reviewed replacement files, excluding credentials and local artifacts. Push the replacement branch without rewriting remote history:
 
-### Business Flow
-1. Register a new business with email
-2. Receive unique 6-character Business ID via email
-3. Share Business ID with employees
-
-### Employee Flow
-1. Enter Business ID to access the portal
-2. New employees register with face capture
-3. Clock in/out by face verification
-
-### Face Recognition
-- Uses TinyFaceDetector for fast face detection
-- 68-point facial landmarks for liveness detection
-- 128-dimensional face descriptors for matching
-- Threshold-based matching (0.6 Euclidean distance)
-
-## Database Schema
-
-See `supabase/schema.sql` for the complete database schema including:
-
-- Businesses table with unique codes
-- Employees table with face encodings
-- Time entries with verification data
-- Row Level Security policies
-
-## Scripts
-
-```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm run start    # Start production server
-npm run lint     # Run ESLint
+```sh
+git push --set-upstream bitbucket codex/replace-with-scheduler
 ```
 
-## License
+Create a pull request into the repository's confirmed production branch. Preserve existing commits; do not force-push or assume the destination branch name.
 
-MIT License
+In the **existing Timesheet Vercel project**, connect the confirmed Bitbucket repository and configure:
+
+- Framework: Next.js; Root Directory: `web`; Node.js: `24.x`.
+- Install command: `npm ci`; build command: `npm run build`.
+- The environment variables above for Production, and Preview when previews need the database. Keep the service-role key server-only.
+- `NEXT_PUBLIC_SITE_URL` matching the actual production/custom domain, with matching Supabase Site URL and redirect allowlist.
+
+Review a preview deployment and its database/authentication behavior before merging to the configured production branch. A preview using the production database can change shared schedule data; use designated test data when validating writes. After production deployment, verify sign-in, schedule loading, and the URL copied by **Copy invite**. No public URL is assigned by this README.
+
+## Data and account transition
+
+Admin setup imports the original October 11–17, 2026 Front Desk spreadsheet snapshot: seven employees and 35 slots. Google Sheets is an initial snapshot, not live synchronization. No live Timesheet records or later edits from the earlier Sites-hosted schedule have been migrated.
+
+Timesheet business codes, client-side password hashes, and face profiles are not Supabase Auth accounts. Create and verify the account matching `ADMIN_EMAIL`, sign in, and select **Set up my admin workspace**. Employees create verified accounts and use fresh joining codes to link to roster entries. Old Timesheet or ChatGPT identities and old invitation codes do not grant access.
+
+Codes expire after seven days and work once; issuing a new code invalidates the prior unused code. Account creation alone gives no schedule access. Review roster details, priority, hire dates, and imported shifts before inviting the team.
+
+Hours use calendar days and Sunday–Saturday weeks. Overnight hours split at midnight; compatible overlapping duties count once. Auto-assignment fills requested open shifts and skips conflicts or hour-limit overages. Admins can explicitly override hour limits. Publishing closes requests; later schedule edits reopen affected weeks as drafts.
+
+## Rollback
+
+The pre-replacement Timesheet code is preserved at commit `f9e735c`. To prepare a separate rollback branch without resetting shared history:
+
+```sh
+git branch rollback/timesheet-before-scheduler f9e735c
+```
+
+For a deployed replacement, promote the previous known-good Timesheet deployment in Vercel, or deploy the rollback branch with the former app's environment configuration. The original local checkout also retains its uncommitted changes, which are not included in `f9e735c`. Keep both the legacy attendance tables and the new scheduling table; application rollback does not require deleting either dataset or rerunning the old schema.

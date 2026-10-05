@@ -1,0 +1,14 @@
+.shell { min-height: 100dvh; display: grid; place-items: center; padding: 40px 20px; background: radial-gradient(ellipse at 15% 10%, #e7f2eb 0, transparent 55%), #f7f8fa; }
+.card { width: 100%; max-width: 460px; padding: 36px; border: 1px solid #dfe8e1; border-radius: 18px; background: #fff; box-shadow: 0 12px 48px #214f4008; }
+.brand { display: flex; align-items: center; gap: 10px; color: #214f40; font-size: 22px; font-weight: 700; margin-bottom: 32px; }
+.brandIcon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: #214f40; color: #d0f9dd; }
+.heading { font-size: 29px; margin-bottom: 12px; }
+.description { color: #6e7f74; font-size: 14px; line-height: 1.7; margin-bottom: 24px; }
+.notice { margin: 18px 0; padding: 12px 14px; border: 1px solid #d5e5d9; border-radius: 8px; background: #eff7f1; color: #355d43; font-size: 14px; line-height: 1.6; }
+.error { border-color: #ecd5ce; background: #fff5f1; color: #994d3c; }
+.links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 24px; font-size: 13px; color: #486b54; }
+.links a:hover { text-decoration: underline; }
+.divider { margin: 24px 0; border-top: 1px solid #e8ede9; }
+.formNote { color: #75877a; font-size: 12px; line-height: 1.6; }
+.configList { margin: 16px 0; padding-left: 20px; color: #526b5b; font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .shell { padding: 24px 16px; } .card { padding: 28px 22px; } }

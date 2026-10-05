@@ -1,0 +1,377 @@
+{
+  "employees": [
+    {
+      "id": "employee-med",
+      "name": "Med",
+      "hireDate": "",
+      "priority": 0,
+      "active": true
+    },
+    {
+      "id": "employee-holly",
+      "name": "Holly",
+      "hireDate": "",
+      "priority": 0,
+      "active": true
+    },
+    {
+      "id": "employee-joanna",
+      "name": "Joanna",
+      "hireDate": "",
+      "priority": 0,
+      "active": true
+    },
+    {
+      "id": "employee-haley",
+      "name": "Haley",
+      "hireDate": "",
+      "priority": 0,
+      "active": true
+    },
+    {
+      "id": "employee-myles",
+      "name": "Myles",
+      "hireDate": "",
+      "priority": 0,
+      "active": true
+    },
+    {
+      "id": "employee-alan",
+      "name": "Alan",
+      "hireDate": "",
+      "priority": 0,
+      "active": true
+    },
+    {
+      "id": "employee-anthony",
+      "name": "Anthony",
+      "hireDate": "",
+      "priority": 0,
+      "active": true
+    }
+  ],
+  "shifts": [
+    {
+      "id": "2026-10-11-morning",
+      "date": "2026-10-11",
+      "start": "07:30",
+      "end": "13:00",
+      "label": "Morning",
+      "employeeId": "employee-med",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-11-afternoon",
+      "date": "2026-10-11",
+      "start": "13:00",
+      "end": "17:00",
+      "label": "Afternoon",
+      "employeeId": "employee-haley",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-11-evening",
+      "date": "2026-10-11",
+      "start": "17:00",
+      "end": "22:00",
+      "label": "Evening",
+      "employeeId": "employee-myles",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-11-cleaning",
+      "date": "2026-10-11",
+      "start": "17:30",
+      "end": "20:30",
+      "label": "Hotel cleaning",
+      "employeeId": "employee-med",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-11-overnight",
+      "date": "2026-10-11",
+      "start": "22:00",
+      "end": "06:00",
+      "label": "Overnight",
+      "employeeId": "employee-alan",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-12-morning",
+      "date": "2026-10-12",
+      "start": "07:30",
+      "end": "13:00",
+      "label": "Morning",
+      "employeeId": "employee-holly",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-12-afternoon",
+      "date": "2026-10-12",
+      "start": "13:00",
+      "end": "17:00",
+      "label": "Afternoon",
+      "employeeId": "employee-haley",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-12-evening",
+      "date": "2026-10-12",
+      "start": "17:00",
+      "end": "22:00",
+      "label": "Evening",
+      "employeeId": "employee-med",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-12-cleaning",
+      "date": "2026-10-12",
+      "start": "17:30",
+      "end": "20:30",
+      "label": "Hotel cleaning",
+      "employeeId": null,
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-12-overnight",
+      "date": "2026-10-12",
+      "start": "22:00",
+      "end": "06:00",
+      "label": "Overnight",
+      "employeeId": "employee-anthony",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-13-morning",
+      "date": "2026-10-13",
+      "start": "07:30",
+      "end": "13:00",
+      "label": "Morning",
+      "employeeId": "employee-holly",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-13-afternoon",
+      "date": "2026-10-13",
+      "start": "13:00",
+      "end": "17:00",
+      "label": "Afternoon",
+      "employeeId": "employee-haley",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-13-evening",
+      "date": "2026-10-13",
+      "start": "17:00",
+      "end": "22:00",
+      "label": "Evening",
+      "employeeId": "employee-med",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-13-cleaning",
+      "date": "2026-10-13",
+      "start": "17:30",
+      "end": "20:30",
+      "label": "Hotel cleaning",
+      "employeeId": null,
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-13-overnight",
+      "date": "2026-10-13",
+      "start": "22:00",
+      "end": "06:00",
+      "label": "Overnight",
+      "employeeId": "employee-anthony",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-14-morning",
+      "date": "2026-10-14",
+      "start": "07:30",
+      "end": "13:00",
+      "label": "Morning",
+      "employeeId": "employee-joanna",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-14-afternoon",
+      "date": "2026-10-14",
+      "start": "13:00",
+      "end": "17:00",
+      "label": "Afternoon",
+      "employeeId": "employee-holly",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-14-evening",
+      "date": "2026-10-14",
+      "start": "17:00",
+      "end": "22:00",
+      "label": "Evening",
+      "employeeId": "employee-med",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-14-cleaning",
+      "date": "2026-10-14",
+      "start": "17:30",
+      "end": "20:30",
+      "label": "Hotel cleaning",
+      "employeeId": null,
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-14-overnight",
+      "date": "2026-10-14",
+      "start": "22:00",
+      "end": "06:00",
+      "label": "Overnight",
+      "employeeId": "employee-alan",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-15-morning",
+      "date": "2026-10-15",
+      "start": "07:30",
+      "end": "13:00",
+      "label": "Morning",
+      "employeeId": "employee-joanna",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-15-afternoon",
+      "date": "2026-10-15",
+      "start": "13:00",
+      "end": "17:00",
+      "label": "Afternoon",
+      "employeeId": "employee-holly",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-15-evening",
+      "date": "2026-10-15",
+      "start": "17:00",
+      "end": "22:00",
+      "label": "Evening",
+      "employeeId": "employee-myles",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-15-cleaning",
+      "date": "2026-10-15",
+      "start": "17:30",
+      "end": "20:30",
+      "label": "Hotel cleaning",
+      "employeeId": null,
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-15-overnight",
+      "date": "2026-10-15",
+      "start": "22:00",
+      "end": "06:00",
+      "label": "Overnight",
+      "employeeId": "employee-alan",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-16-morning",
+      "date": "2026-10-16",
+      "start": "07:30",
+      "end": "13:00",
+      "label": "Morning",
+      "employeeId": "employee-joanna",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-16-afternoon",
+      "date": "2026-10-16",
+      "start": "13:00",
+      "end": "17:00",
+      "label": "Afternoon",
+      "employeeId": "employee-myles",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-16-evening",
+      "date": "2026-10-16",
+      "start": "17:00",
+      "end": "22:00",
+      "label": "Evening",
+      "employeeId": "employee-med",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-16-cleaning",
+      "date": "2026-10-16",
+      "start": "17:30",
+      "end": "20:30",
+      "label": "Hotel cleaning",
+      "employeeId": null,
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-16-overnight",
+      "date": "2026-10-16",
+      "start": "22:00",
+      "end": "06:00",
+      "label": "Overnight",
+      "employeeId": "employee-anthony",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-17-morning",
+      "date": "2026-10-17",
+      "start": "07:30",
+      "end": "13:00",
+      "label": "Morning",
+      "employeeId": "employee-med",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-17-afternoon",
+      "date": "2026-10-17",
+      "start": "13:00",
+      "end": "17:00",
+      "label": "Afternoon",
+      "employeeId": "employee-alan",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-17-evening",
+      "date": "2026-10-17",
+      "start": "17:00",
+      "end": "22:00",
+      "label": "Evening",
+      "employeeId": "employee-joanna",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-17-cleaning",
+      "date": "2026-10-17",
+      "start": "17:30",
+      "end": "20:30",
+      "label": "Hotel cleaning",
+      "employeeId": "employee-alan",
+      "source": "sheet"
+    },
+    {
+      "id": "2026-10-17-overnight",
+      "date": "2026-10-17",
+      "start": "22:00",
+      "end": "06:00",
+      "label": "Overnight",
+      "employeeId": "employee-anthony",
+      "source": "sheet"
+    }
+  ],
+  "notes": [
+    "26-29 October off holly",
+    "22-26 off myles",
+    "22 med off oct",
+    "October 17-18 myles",
+    "17th and 24th off in October,alice"
+  ]
+}
