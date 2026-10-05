@@ -14,6 +14,7 @@ import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/u
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import ShiftBoard from './shift-board';
+import './calendar.css';
 import WorkHourSettingsPanel from './work-hour-settings';
 import EmployeeAccessLink from './employee-access-link';
 import { assignmentHourIssues, workHourSettings, weekHourIssues, hourIssueText, overlaps, planWeekCopy, type WorkHourSettings, INITIAL_WEEK, SOURCE_URL, addDays, weekOf, type Employee, type Shift, type ShiftRequest } from '@/lib/schedule';
