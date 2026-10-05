@@ -2,7 +2,7 @@
 
 Employee shift scheduling built with Next.js, TypeScript, Supabase Auth, and Supabase Postgres. The application lives in `web/` so the existing Timesheet Vercel project can keep **Root Directory: `web`**. It is intended to reuse the Timesheet Supabase project.
 
-The prepared branch is `codex/replace-with-scheduler`, based on Timesheet commit `f9e735c`, in the [GitHub Timesheet repository](https://github.com/xhello/timesheet). Its `origin` remote is `https://github.com/xhello/timesheet.git`. The original Timesheet checkout and its uncommitted changes were left untouched. GitHub is already connected to Vercel project `justicehires-projects/timesheet`, whose current public address is `https://timesheet-sable.vercel.app`. Completing the replacement still requires Vercel configuration access and working Timesheet Supabase configuration, including the missing server-only service-role key.
+The replacement is merged into `main` in the [GitHub Timesheet repository](https://github.com/xhello/timesheet) and deployed at **https://timesheet-sable.vercel.app** through Vercel project `justicehires-projects/timesheet`. The existing Timesheet Supabase project has been resumed, the scheduler migration applied, and production authentication, email delivery settings, and server credentials configured. Create and verify the account matching the configured `ADMIN_EMAIL` to initialize the scheduler. The original local Timesheet checkout and its uncommitted changes remain intact; its pre-replacement base is `f9e735c`.
 
 ## Included
 
@@ -16,15 +16,15 @@ The prepared branch is `codex/replace-with-scheduler`, based on Timesheet commit
 
 ## Connect the Timesheet Supabase project
 
-The saved Timesheet Supabase hostname did not resolve during preparation. Check its active project URL and matching public API key in Supabase project settings, and configure its missing **server-only service-role key**.
+Production reuses the existing Timesheet Supabase project and its original keys. The project had been paused and was resumed during deployment. The following instructions document the configuration for future environments; production already has its **server-only service-role key** configured.
 
-Run only `supabase/migrations/0001_workspace.sql` from this repository in that project's SQL Editor. This additive migration creates `public.schedule_workspace`; it does not change Timesheet attendance tables or import their records. Apply it once. If the table already exists, inspect its schema and data before making changes.
+Production already has `supabase/migrations/0001_workspace.sql` applied. For a fresh environment, run only that migration from this repository in the project's SQL Editor. This additive migration creates `public.schedule_workspace`; it does not change Timesheet attendance tables or import their records. Apply it once. If the table already exists, inspect its schema and data before making changes.
 
 The scheduling table enables Row Level Security and revokes access from anonymous and authenticated browser clients. The server accesses it using the service role and enforces application permissions. Existing Timesheet tables and their policies remain unchanged.
 
 The old destructive `supabase/schema.sql` was removed from this branch and remains in Git history at `f9e735c`. **Do not run it against the reused database:** it drops Timesheet tables with `CASCADE`.
 
-In Supabase Authentication:
+Production account emails use the existing verified Resend provider. The Supabase Authentication configuration is:
 
 1. Enable email/password accounts and email confirmation.
 2. Configure production SMTP for confirmation and password-reset emails. The former app's `RESEND_API_KEY` environment variable does not configure Supabase Auth email delivery. See the [Supabase SMTP guide](https://supabase.com/docs/guides/auth/auth-smtp).
@@ -60,9 +60,9 @@ npm run dev
 
 Open `http://localhost:3000`. Full integration verification requires the configured database, migration, and Auth settings. Check verified admin setup, an employee joining with a fresh code, shift requests, priority assignment, hour-limit enforcement and override, sign-out, and password reset. Use designated test accounts for onboarding checks.
 
-## Upload to GitHub and replace the Vercel app
+## Publish future changes to GitHub and Vercel
 
-Use the existing `origin` remote, `https://github.com/xhello/timesheet.git`. Fetch its latest history before publishing the prepared replacement branch:
+Use the existing `origin` remote, `https://github.com/xhello/timesheet.git`. Fetch its latest history before publishing changes:
 
 ```sh
 git remote -v
@@ -76,7 +76,7 @@ Review the remote history and reconcile any differences. Commit the reviewed rep
 git push --set-upstream origin codex/replace-with-scheduler
 ```
 
-Merge the replacement into the branch configured for production in Vercel, using a pull request if the repository requires one. Preserve existing commits and reconcile any intervening changes without force-pushing.
+Production tracks `main`. Merge future changes into that branch, using a pull request if the repository requires one. Preserve existing commits and reconcile any intervening changes without force-pushing.
 
 The **existing Timesheet Vercel project** is already linked to GitHub `xhello/timesheet`. With access to that project, verify and configure:
 
