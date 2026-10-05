@@ -2,7 +2,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { normalizePhone } from '@/lib/phone';
 import { isSameOriginRequest } from '@/app/auth/origin';
 import { createState, readState, commitState } from '@/lib/storage';
-import { State, Shift, INITIAL_WEEK, weekOf, addDays, conflict, rankedRequests, reconcileRequestAssignments, workHourSettings, assignmentHourIssues, weekHourIssues, hourIssueText } from '@/lib/schedule';
+import { State, Shift, INITIAL_WEEK, weekOf, addDays, conflict, rankedRequests, reconcileRequestAssignments, planWeekCopy, workHourSettings, assignmentHourIssues, weekHourIssues, hourIssueText } from '@/lib/schedule';
 import imported from '@/lib/imported.json';
 import { z } from 'zod';
 export const dynamic='force-dynamic';
@@ -24,7 +24,7 @@ const input=z.discriminatedUnion('action',[
  z.object({action:z.literal('request'),shiftId:txt,note:z.string().trim().max(300),employeeId:z.string().optional()}),
  z.object({action:z.literal('withdraw'),requestId:txt}),
  z.object({action:z.literal('auto'),week:date}),
- z.object({action:z.literal('week'),week:date}),
+ z.object({action:z.literal('week'),week:date,sourceWeek:date.optional(),copyAssignments:z.boolean().optional(),allowOverlap:z.boolean().optional(),overrideHourLimits:z.boolean().optional()}),
  z.object({action:z.literal('publish'),week:date,published:z.boolean(),overrideHourLimits:z.boolean().optional()}),
 ]);
 function fail(message:string,status=400):never { throw Object.assign(new Error(message),{status}); }
@@ -117,10 +117,43 @@ export async function POST(req:Request){try{
  }
  case 'withdraw':{const r=state.requests.find(r=>r.id===a.requestId);if(!r)fail('Request not found.',404);if(!admin&&r.employeeId!==me!.id)fail('This is not your request.',403);if(state.weeks[weekOf(getShift(r.shiftId).date)]==='published')fail('Published requests cannot be withdrawn.');state.requests=state.requests.filter(x=>x.id!==r.id);message='Request withdrawn.';break;}
  case 'auto':{if(!state.priorityConfirmed)fail('Set and save the priority order first.');if(state.weeks[a.week]==='published')fail('Reopen this week before updating automatic assignments.');for(const s of state.shifts)if(weekOf(s.date)===a.week&&!s.employeeId)s.requestAssignmentLocked=false;state.weeks[a.week]='draft';message='Request assignments refreshed by priority. Manual assignments and work-hour limits were respected.';break;}
- case 'week':{const w=weekOf(a.week);if(state.shifts.some(s=>weekOf(s.date)===w))fail('This week already has shifts.');const templates=[['Morning','07:30','13:00'],['Afternoon','13:00','17:00'],['Evening','17:00','22:00'],['Hotel cleaning','17:30','20:30'],['Overnight','22:00','06:00']];for(let i=0;i<7;i++)for(const [label,start,end] of templates)state.shifts.push({id:crypto.randomUUID(),date:addDays(w,i),label,start,end,employeeId:null,source:'template'});state.weeks[w]='draft';message='New week created with your five shift types.';break;}
+ case 'week':{
+  const w=weekOf(a.week);
+  if(state.shifts.some(s=>weekOf(s.date)===w))fail('This week already has shifts. Choose an empty week.',409);
+  if(state.weeks[w]==='published')fail('This week is already published. Reopen it before adding shifts.',409);
+  if(a.copyAssignments&&!a.sourceWeek)fail('Choose a source week before copying employee assignments.');
+  let additions:Shift[];
+  if(a.sourceWeek){
+   const source=weekOf(a.sourceWeek);
+   if(source>=w)fail('Choose a source week earlier than the new week.');
+   const count=state.shifts.filter(s=>weekOf(s.date)===source).length;
+   if(!count)fail('The source week has no shifts to copy.');
+   if(state.shifts.length+count>10000)fail('Schedule limit reached. This week would exceed 10,000 shifts.');
+   const plan=planWeekCopy(state,w,source,a.copyAssignments===true);
+   if(plan.overlapEmployeeIds.length&&!a.allowOverlap)fail('Copied assignments would overlap other shifts. Review the overlaps and explicitly approve compatible duties.',422);
+   if(plan.hourIssues.length&&!a.overrideHourLimits)fail('Copied assignments exceed work-hour limits: '+plan.hourIssues.map(hourIssueText).join('; ')+'. Review them and explicitly approve extra hours.',422);
+   additions=plan.shifts.map(shift=>({...shift,id:crypto.randomUUID()}));
+   if(a.overrideHourLimits&&plan.hourIssues.length){
+    const proposed={shifts:[...state.shifts,...additions],settings:state.settings};
+    for(const shift of additions)if(shift.employeeId&&assignmentHourIssues(proposed,shift,shift.employeeId).length)shift.hourLimitOverride=true;
+   }
+   const assigned=additions.filter(shift=>shift.employeeId).length;
+   message=`${additions.length} shifts copied to a new draft week${a.copyAssignments?` with ${assigned} assignment${assigned===1?'':'s'}`:''}.`;
+   if(plan.unassignedCount)message+=` ${plan.unassignedCount} shift${plan.unassignedCount===1?' was':'s were'} left unassigned because the employee is missing or inactive.`;
+  } else {
+   if(state.shifts.length+35>10000)fail('Schedule limit reached. This week would exceed 10,000 shifts.');
+   const templates=[['Morning','07:30','13:00'],['Afternoon','13:00','17:00'],['Evening','17:00','22:00'],['Hotel cleaning','17:30','20:30'],['Overnight','22:00','06:00']];
+   additions=[];
+   for(let i=0;i<7;i++)for(const [label,start,end] of templates)additions.push({id:crypto.randomUUID(),date:addDays(w,i),label,start,end,employeeId:null,source:'template'});
+   message='New draft week created with your five shift types.';
+  }
+  state.shifts.push(...additions);state.weeks[w]='draft';break;
+ }
  case 'publish':{if(!state.shifts.some(s=>weekOf(s.date)===a.week))fail('Create shifts before publishing.');if(a.published){reconcileRequestAssignments(state);const issues=weekHourIssues(state,a.week);if(issues.length&&!a.overrideHourLimits)fail('This schedule exceeds work-hour limits. Review the flagged employees and explicitly approve an admin override before publishing.',422);}state.weeks[a.week]=a.published?'published':'draft';message=a.published?'Schedule published to employees.':'Week reopened for requests and edits.';break;}
  }
- reconcileRequestAssignments(state);
+ // Creating a week does not revise the existing schedule. Copied assignments
+ // were checked against every existing shift, including adjacent weeks.
+ if(a.action!=='week')reconcileRequestAssignments(state);
  if(a.action==='request'){
   const s=getShift(a.shiftId),requester=admin?a.employeeId:me!.id;
   message=!state.priorityConfirmed?'Request saved. Your admin needs to save the priority order.':s.source==='request-priority'&&s.employeeId===requester?'Request saved and provisionally assigned by priority.':'Request saved in the priority queue.';

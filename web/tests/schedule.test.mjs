@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fillByPriority, overlaps, weekOf, rankedRequests, reconcileRequestAssignments} from '../lib/schedule.ts';
+import {fillByPriority, overlaps, weekOf, rankedRequests, reconcileRequestAssignments, planWeekCopy} from '../lib/schedule.ts';
 const shift=(id,date,start,end,employeeId=null)=>({id,date,start,end,label:'Desk',employeeId,source:'test'});
 const request=(id,shiftId,employeeId,createdAt='2026-10-01T00:00:00Z')=>({id,shiftId,employeeId,createdAt,note:''});
 function state(shifts,requests){return {ownerId:'owner',ownerName:'Admin',employees:[{id:'senior',priority:1,active:true},{id:'junior',priority:2,active:true}],shifts,requests,weeks:{},priorityConfirmed:true,imported:false,notes:[]};}
@@ -157,4 +157,56 @@ test('live shift traversal uses date, start, and id deterministically without re
   const shuffled=state([...s.shifts].reverse().map(x=>({...x,employeeId:null,source:'test'})),[...s.requests].reverse());
   assert.equal(reconcileRequestAssignments(shuffled),1);
   assert.equal(shuffled.shifts.find(x=>x.id==='a').employeeId,'senior');
+});
+
+test('week copy preserves weekday and civil hours across year and daylight-saving boundaries without mutating source',()=>{
+  const originals=[{...shift('night','2027-01-02','22:00','06:00','senior'),source:'imported',note:'Private',hourLimitOverride:true,requestAssignmentLocked:true},shift('custom','2026-12-31','18:15','20:45')];
+  const s=state(originals,[request('original','night','senior')]);
+  s.weeks['2026-12-27']='published';
+  const before=structuredClone(s);
+  const plan=planWeekCopy(s,'2027-01-05','2026-12-30');
+  assert.deepEqual(plan.shifts.map(x=>[x.date,x.start,x.end]),[['2027-01-07','18:15','20:45'],['2027-01-09','22:00','06:00']]);
+  assert.ok(plan.shifts.every(x=>x.employeeId===null&&x.source==='copy'));
+  assert.deepEqual(Object.keys(plan.shifts[1]).sort(),['date','employeeId','end','id','label','source','start']);
+  assert.deepEqual(s,before);
+  assert.deepEqual(planWeekCopy(s,'2027-01-05','2026-12-30'),plan);
+  const spring=state([shift('morning','2026-03-01','07:30','13:00')],[]);
+  assert.deepEqual(planWeekCopy(spring,'2026-03-08','2026-03-01').shifts.map(x=>[x.date,x.start,x.end]),[['2026-03-08','07:30','13:00']]);
+});
+
+test('week copy retains only active assignees and does not inherit approvals or private fields',()=>{
+  const s=state([{...shift('active','2026-10-11','08:00','12:00','senior'),note:'Secret',hourLimitOverride:true,requestAssignmentLocked:true},shift('inactive','2026-10-12','08:00','12:00','junior'),shift('missing','2026-10-13','08:00','12:00','deleted')],[]);
+  s.employees[1].active=false;
+  const plan=planWeekCopy(s,'2026-10-25','2026-10-11',true);
+  assert.deepEqual(plan.shifts.map(x=>x.employeeId),['senior',null,null]);
+  assert.equal(plan.unassignedCount,2);
+  assert.ok(plan.shifts.every(x=>!('note' in x)&&!('hourLimitOverride' in x)&&!('requestAssignmentLocked' in x)));
+  assert.deepEqual(plan.hourIssues,[]);
+  assert.deepEqual(plan.overlapEmployeeIds,[]);
+});
+
+test('week copy evaluates copied overlaps and overnight conflicts with adjacent existing weeks',()=>{
+  const s=state([shift('desk','2026-10-11','05:00','09:00','senior'),shift('cleaning','2026-10-11','08:00','10:00','senior'),shift('previous-night','2026-10-24','22:00','06:00','senior')],[]);
+  const plan=planWeekCopy(s,'2026-10-25','2026-10-11',true);
+  assert.deepEqual(plan.overlapEmployeeIds,['senior']);
+  assert.deepEqual(plan.hourIssues,[{employeeId:'senior',kind:'day',period:'2026-10-25',hours:10,limit:8}]);
+  const empty=planWeekCopy(s,'2026-10-25','2026-10-11',false);
+  assert.deepEqual(empty.overlapEmployeeIds,[]);
+  assert.deepEqual(empty.hourIssues,[]);
+});
+
+test('week copy checks all copied hours together and overnight spill into a future published week',()=>{
+  const s=state(Array.from({length:6},(_,i)=>shift(`source-${i}`,`2026-10-${11+i}`,'08:00','16:00','senior')),[]);
+  const weekly=planWeekCopy(s,'2026-10-25','2026-10-11',true);
+  assert.deepEqual(weekly.hourIssues,[{employeeId:'senior',kind:'week',period:'2026-10-25',hours:48,limit:40}]);
+  const boundary=state([shift('source-night','2026-10-17','22:00','06:00','senior'),...Array.from({length:5},(_,i)=>shift(`future-${i}`,`2026-11-${String(2+i).padStart(2,'0')}`,'08:00','16:00','senior'))],[]);
+  boundary.weeks['2026-11-01']='published';
+  assert.deepEqual(planWeekCopy(boundary,'2026-10-25','2026-10-11',true).hourIssues,[{employeeId:'senior',kind:'week',period:'2026-11-01',hours:46,limit:40}]);
+});
+
+test('week copy rejects empty, same, and later source weeks',()=>{
+  const s=state([shift('source','2026-10-11','08:00','12:00')],[]);
+  assert.throws(()=>planWeekCopy(s,'2026-10-11','2026-10-11'),/earlier/);
+  assert.throws(()=>planWeekCopy(s,'2026-10-04','2026-10-11'),/earlier/);
+  assert.throws(()=>planWeekCopy(s,'2026-10-25','2026-10-18'),/no shifts/);
 });

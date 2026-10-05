@@ -58,6 +58,33 @@ export function weekHourIssues(state:Pick<State,'shifts'|'settings'|'employees'>
 export function formatHours(hours:number) {return Number(hours.toFixed(2)).toString();}
 export function hourIssueText(issue:HourLimitIssue) {return `${formatHours(issue.hours)} hours ${issue.kind==='day'?'on':'in the week of'} ${issue.period} (limit ${formatHours(issue.limit)})`;}
 
+export type WeekCopyPlan = { shifts: Shift[]; hourIssues: HourLimitIssue[]; overlapEmployeeIds: string[]; unassignedCount: number };
+
+/** Preview a copy without altering saved shifts or carrying private data/approvals. */
+export function planWeekCopy(state: Pick<State,'shifts'|'employees'|'settings'>, targetWeek: string, sourceWeek: string, copyAssignments = false): WeekCopyPlan {
+  const target=weekOf(targetWeek),source=weekOf(sourceWeek);
+  if(source>=target) throw new Error('Choose a source week earlier than the new week.');
+  const originals=state.shifts.filter(shift=>weekOf(shift.date)===source)
+    .sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start)||a.id.localeCompare(b.id));
+  if(!originals.length) throw new Error('The source week has no shifts to copy.');
+  const activeIds=new Set(state.employees.filter(employee=>employee.active).map(employee=>employee.id));
+  let unassignedCount=0;
+  const shifts:Shift[]=originals.map(original=>{
+    const employeeId=copyAssignments&&original.employeeId&&activeIds.has(original.employeeId)?original.employeeId:null;
+    if(copyAssignments&&original.employeeId&&!employeeId) unassignedCount++;
+    return {id:`copy:${target}:${original.id}`,date:addDays(target,new Date(original.date+'T12:00:00Z').getUTCDay()),start:original.start,end:original.end,label:original.label,employeeId,source:'copy'};
+  });
+  const hourIssues:HourLimitIssue[]=[],overlapEmployeeIds:string[]=[];
+  const affectedIds=[...new Set(shifts.flatMap(shift=>shift.employeeId?[shift.employeeId]:[]))];
+  for(const employeeId of affectedIds) {
+    const additions=shifts.filter(shift=>shift.employeeId===employeeId);
+    const combined=[...state.shifts.filter(shift=>shift.employeeId===employeeId),...additions];
+    if(additions.some(shift=>combined.some(other=>other!==shift&&overlaps(shift,other)))) overlapEmployeeIds.push(employeeId);
+    hourIssues.push(...issuesForDates(combined,employeeId,additions.flatMap(touchedDates),workHourSettings(state)));
+  }
+  return {shifts,hourIssues,overlapEmployeeIds,unassignedCount};
+}
+
 /** Return a sorted copy; the saved request order and private request notes stay intact. */
 export function rankedRequests(state: Pick<State, 'employees'|'requests'>, shiftId?: string): ShiftRequest[] {
   const employees = new Map(state.employees.filter(employee=>employee.active).map(employee=>[employee.id,employee]));

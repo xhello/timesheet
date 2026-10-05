@@ -11,6 +11,7 @@ The replacement is merged into `main` in the [GitHub Timesheet repository](https
 - Live priority-based assignments when employees request shifts, with ranked requester lists visible to the team.
 - Manual assignment and move controls that take precedence over automatic requests.
 - One-tap employee requests and cancellation, inline admin assignment, and a daily view on phones.
+- Create a week from any earlier week's shifts, with optional employee assignments, or use standard shifts.
 - Configurable daily/weekly limits, defaulting to 8 and 40 hours, with explicit admin overrides.
 - Verified email/password sign-in for the admin; employees sign in using their registered phone number alone.
 - Admin-managed employee phone numbers and a copyable employee login link. No employee email, password, SMS verification, or invite code.
@@ -101,6 +102,8 @@ Use one unique phone number per active employee. US/Canada 10-digit numbers are 
 Phone-only access is intentional: anyone who knows a registered number can sign in as that employee. Signed HttpOnly cookies and shared rate limits protect session integrity and limit guessing; they do not verify ownership of the number. Review roster details, priority, hire dates, and imported shifts before sharing the login link.
 
 ## Shift requests and priority
+
+To create next week's schedule, navigate to an empty week and select **Create this week**. **Copy from** defaults to the previous week when available; choose any earlier saved week or **Standard shifts**. Copying keeps the shift names, times, and weekdays. **Include assigned employees** is optional and off by default; missing or inactive employees leave open shifts. The new week starts as a draft with fresh requests. Existing weeks stay unchanged. Copied assignments are checked against current hour limits and neighboring overnight shifts, and any exceptions require fresh admin approval.
 
 Choose a complete order under **Team** before automatic request assignment begins. **Use this order** confirms the displayed initial order; moving an employee up or down saves immediately. For each open draft shift, the highest-priority eligible requester is provisionally assigned immediately. A later request from a higher-priority employee can replace that provisional assignment; withdrawal promotes the next eligible requester. Priority changes and work-hour setting changes also recalculate draft request assignments. Overlapping shifts and daily/weekly hour limits remain enforced automatically. Requests that cannot be assigned stay in the queue.
 

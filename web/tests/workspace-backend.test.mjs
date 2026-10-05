@@ -300,3 +300,156 @@ test('publishing freezes provisional winners and blocks new requests, withdrawal
   assert.equal(app.snapshot().state.shifts[0].employeeId, 'junior');
   assert.equal(app.snapshot().state.weeks['2026-10-11'], 'published');
 });
+
+function copyState() {
+  const state=initial();
+  state.priorityConfirmed=true;
+  state.employees.push({id:'inactive',name:'Inactive',hireDate:'',priority:2,active:false});
+  state.shifts=[
+    {id:'morning',date:'2026-10-11',start:'08:00',end:'12:00',label:'Front desk',employeeId:employee.employeeId,source:'imported',note:'Private source note',hourLimitOverride:true,requestAssignmentLocked:true},
+    {id:'custom',date:'2026-10-13',start:'18:15',end:'20:45',label:'Custom duty',employeeId:'inactive',source:'manual'},
+    {id:'night',date:'2026-10-17',start:'22:00',end:'06:00',label:'Overnight',employeeId:'deleted',source:'priority'},
+    {id:'pending',date:'2026-10-18',start:'08:00',end:'12:00',label:'Existing pending',employeeId:null,source:'manual'},
+  ];
+  state.weeks={'2026-10-11':'published','2026-10-18':'draft'};
+  state.requests=[{id:'private-request',shiftId:'morning',employeeId:employee.employeeId,createdAt:'2026-10-01',note:'Private request note'},{id:'pending-request',shiftId:'pending',employeeId:employee.employeeId,createdAt:'2026-10-01',note:'Still pending'}];
+  return state;
+}
+
+test('copy week defaults to unassigned fresh shifts and preserves source data, requests, and other drafts',async()=>{
+  const state=copyState(),saved={state,version:9},app=harness({saved});
+  const response=await app.POST(request({action:'week',week:'2026-10-27',sourceWeek:'2026-10-14',version:9}));
+  assert.equal(response.status,200);
+  const updated=app.snapshot();
+  assert.equal(updated.version,10);
+  assert.equal(app.writes(),1);
+  assert.deepEqual(updated.state.shifts.slice(0,state.shifts.length),state.shifts);
+  assert.deepEqual(updated.state.requests,state.requests);
+  assert.deepEqual(updated.state.employees,state.employees);
+  assert.deepEqual(updated.state.weeks,{...state.weeks,'2026-10-25':'draft'});
+  const copied=updated.state.shifts.slice(state.shifts.length);
+  assert.deepEqual(copied.map(s=>[s.date,s.label,s.start,s.end]),[['2026-10-25','Front desk','08:00','12:00'],['2026-10-27','Custom duty','18:15','20:45'],['2026-10-31','Overnight','22:00','06:00']]);
+  assert.ok(copied.every(s=>s.employeeId===null&&s.source==='copy'));
+  assert.equal(new Set(copied.map(s=>s.id)).size,3);
+  for(const shift of copied){
+    assert.match(shift.id,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    assert.ok(!state.shifts.some(s=>s.id===shift.id));
+    assert.deepEqual(Object.keys(shift).sort(),['date','employeeId','end','id','label','source','start']);
+  }
+});
+
+test('copy assignments retains active staff, reports unavailable staff, and requires fresh approvals only when needed',async()=>{
+  const state=copyState();
+  const app=harness({saved:{state,version:0}});
+  const response=await app.POST(request({action:'week',week:'2026-10-25',sourceWeek:'2026-10-11',copyAssignments:true,allowOverlap:true,overrideHourLimits:true,version:0}));
+  assert.equal(response.status,200);
+  const body=await response.json();
+  assert.match(body.message,/2 shifts were left unassigned/);
+  const copied=app.snapshot().state.shifts.slice(state.shifts.length);
+  assert.deepEqual(copied.map(s=>s.employeeId),[employee.employeeId,null,null]);
+  assert.ok(copied.every(s=>s.source==='copy'&&!('hourLimitOverride' in s)&&!('requestAssignmentLocked' in s)&&!('note' in s)));
+});
+
+test('copy rejects overlapping assignments atomically until admin explicitly approves compatible duties',async()=>{
+  const state=initial();
+  state.shifts=[
+    {id:'first',date:'2026-10-11',start:'08:00',end:'12:00',label:'Desk',employeeId:employee.employeeId,source:'manual'},
+    {id:'second',date:'2026-10-11',start:'11:00',end:'14:00',label:'Cleaning',employeeId:employee.employeeId,source:'manual'},
+  ];
+  const saved={state,version:0},app=harness({saved});
+  const action={action:'week',week:'2026-10-25',sourceWeek:'2026-10-11',copyAssignments:true,version:0};
+  assert.equal((await app.POST(request(action))).status,422);
+  assert.deepEqual(app.snapshot(),saved);
+  assert.equal(app.writes(),0);
+  assert.equal((await app.POST(request({...action,allowOverlap:true}))).status,200);
+  assert.ok(app.snapshot().state.shifts.slice(2).every(s=>s.employeeId===employee.employeeId&&!s.hourLimitOverride));
+});
+
+test('copied daily overages need explicit hour approval and only affected new shifts receive it',async()=>{
+  const state=initial();
+  state.shifts=[
+    {id:'first',date:'2026-10-11',start:'08:00',end:'13:00',label:'Morning',employeeId:employee.employeeId,source:'manual',hourLimitOverride:true},
+    {id:'second',date:'2026-10-11',start:'13:00',end:'18:00',label:'Afternoon',employeeId:employee.employeeId,source:'manual',hourLimitOverride:true},
+    {id:'safe',date:'2026-10-12',start:'08:00',end:'12:00',label:'Monday',employeeId:employee.employeeId,source:'manual',hourLimitOverride:true},
+  ];
+  const saved={state,version:0},app=harness({saved});
+  const action={action:'week',week:'2026-10-25',sourceWeek:'2026-10-11',copyAssignments:true,version:0};
+  assert.equal((await app.POST(request(action))).status,422);
+  assert.equal(app.writes(),0);
+  assert.deepEqual(app.snapshot(),saved);
+  assert.equal((await app.POST(request({...action,overrideHourLimits:true}))).status,200);
+  const copied=app.snapshot().state.shifts.slice(3);
+  assert.deepEqual(copied.map(s=>s.hourLimitOverride),[true,true,undefined]);
+  assert.deepEqual(app.snapshot().state.shifts.slice(0,3),state.shifts);
+});
+
+test('copy checks adjacent-week overnight conflicts and weekly totals before committing',async()=>{
+  const state=initial();
+  state.shifts=[{id:'night-source',date:'2026-10-17',start:'22:00',end:'06:00',label:'Overnight',employeeId:employee.employeeId,source:'manual'},...Array.from({length:5},(_,i)=>({id:`future-${i}`,date:`2026-11-${String(1+i).padStart(2,'0')}`,start:'05:00',end:'13:00',label:'Published work',employeeId:employee.employeeId,source:'manual'}))];
+  state.weeks={'2026-11-01':'published'};
+  const saved={state,version:0},app=harness({saved});
+  const action={action:'week',week:'2026-10-25',sourceWeek:'2026-10-11',copyAssignments:true,version:0};
+  assert.equal((await app.POST(request(action))).status,422);
+  const hourFailure=await app.POST(request({...action,allowOverlap:true}));
+  assert.equal(hourFailure.status,422);
+  assert.match((await hourFailure.json()).error,/2026-11-01/);
+  assert.equal(app.writes(),0);
+  assert.deepEqual(app.snapshot(),saved);
+  assert.equal((await app.POST(request({...action,allowOverlap:true,overrideHourLimits:true}))).status,200);
+  assert.equal(app.snapshot().state.shifts.at(-1).hourLimitOverride,true);
+  assert.deepEqual(app.snapshot().state.shifts.slice(0,state.shifts.length),state.shifts);
+  assert.equal(app.snapshot().state.weeks['2026-11-01'],'published');
+});
+
+test('week creation validates source and target weeks, authorization, and optimistic version conflicts',async()=>{
+  const state=copyState(),saved={state,version:4};
+  const valid={action:'week',week:'2026-10-25',sourceWeek:'2026-10-11',version:4};
+  const member=harness({user:employee,saved});
+  assert.equal((await member.POST(request(valid))).status,403);
+  assert.equal(member.writes(),0);
+  for(const action of [{...valid,week:'2026-10-11'},{...valid,sourceWeek:'2026-10-25'},{...valid,sourceWeek:'2026-11-01'},{...valid,sourceWeek:'2026-10-04'},{...valid,sourceWeek:undefined,copyAssignments:true}]){
+    const app=harness({saved});
+    assert.ok([400,409].includes((await app.POST(request(action))).status));
+    assert.equal(app.writes(),0);
+    assert.deepEqual(app.snapshot(),saved);
+  }
+  const published=structuredClone(saved);published.state.weeks['2026-10-25']='published';
+  const occupied=harness({saved:published});
+  assert.equal((await occupied.POST(request(valid))).status,409);
+  assert.equal(occupied.writes(),0);
+  const stale=harness({saved});
+  assert.equal((await stale.POST(request({...valid,version:3}))).status,409);
+  assert.equal(stale.writes(),0);
+  const raced=harness({saved,conflict:true});
+  assert.equal((await raced.POST(request(valid))).status,409);
+  assert.deepEqual(raced.snapshot(),saved);
+  assert.equal(raced.writes(),1);
+});
+
+test('standard week templates remain available, respect canonical dates, and preserve unrelated requests',async()=>{
+  const state=copyState();state.weeks['2026-10-25']='draft';
+  const app=harness({saved:{state,version:0}});
+  assert.equal((await app.POST(request({action:'week',week:'2026-10-28',version:0}))).status,200);
+  const updated=app.snapshot().state;
+  assert.equal(updated.shifts.length,state.shifts.length+35);
+  const created=updated.shifts.slice(state.shifts.length);
+  assert.equal(created[0].date,'2026-10-25');assert.equal(created.at(-1).date,'2026-10-31');
+  assert.ok(created.every(s=>s.employeeId===null&&s.source==='template'));
+  assert.deepEqual(updated.shifts.slice(0,state.shifts.length),state.shifts);
+  assert.deepEqual(updated.requests,state.requests);
+});
+
+test('both copied and template weeks enforce the total shift cap without partial writes',async()=>{
+  const state=initial();
+  state.shifts=Array.from({length:9990},(_,i)=>({id:`existing-${i}`,date:'2026-10-11',start:'08:00',end:'12:00',label:'Existing',employeeId:null,source:'manual'}));
+  for(const sourceWeek of [undefined,'2026-10-11']){
+    const app=harness({saved:{state,version:0}});
+    assert.equal((await app.POST(request({action:'week',week:'2026-10-25',sourceWeek,version:0}))).status,400);
+    assert.equal(app.writes(),0);
+    assert.equal(app.snapshot().state.shifts.length,9990);
+  }
+  state.shifts.length=9965;
+  const exact=harness({saved:{state,version:0}});
+  assert.equal((await exact.POST(request({action:'week',week:'2026-10-25',version:0}))).status,200);
+  assert.equal(exact.snapshot().state.shifts.length,10000);
+});
