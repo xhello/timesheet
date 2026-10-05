@@ -2,7 +2,7 @@
 
 Employee shift scheduling built with Next.js, TypeScript, Supabase Auth, and Supabase Postgres. The application lives in `web/` so the existing Timesheet Vercel project can keep **Root Directory: `web`**. It is intended to reuse the Timesheet Supabase project.
 
-The prepared branch is `codex/replace-with-scheduler`, based on Timesheet commit `f9e735c`. The original Timesheet checkout and its uncommitted changes were left untouched. Preparing this branch does not upload code, deploy the application, or migrate a live database. The Bitbucket repository URL and production app URL must be confirmed before publishing.
+The prepared branch is `codex/replace-with-scheduler`, based on Timesheet commit `f9e735c`, in the [GitHub Timesheet repository](https://github.com/xhello/timesheet). Its `origin` remote is `https://github.com/xhello/timesheet.git`. The original Timesheet checkout and its uncommitted changes were left untouched. GitHub is already connected to Vercel project `justicehires-projects/timesheet`, whose current public address is `https://timesheet-sable.vercel.app`. Completing the replacement still requires Vercel configuration access and working Timesheet Supabase configuration, including the missing server-only service-role key.
 
 ## Included
 
@@ -16,7 +16,7 @@ The prepared branch is `codex/replace-with-scheduler`, based on Timesheet commit
 
 ## Connect the Timesheet Supabase project
 
-Confirm the saved Timesheet connection points to the intended active project. Obtain its public API key and its **server-only service-role key** from Supabase project settings.
+The saved Timesheet Supabase hostname did not resolve during preparation. Check its active project URL and matching public API key in Supabase project settings, and configure its missing **server-only service-role key**.
 
 Run only `supabase/migrations/0001_workspace.sql` from this repository in that project's SQL Editor. This additive migration creates `public.schedule_workspace`; it does not change Timesheet attendance tables or import their records. Apply it once. If the table already exists, inspect its schema and data before making changes.
 
@@ -60,32 +60,32 @@ npm run dev
 
 Open `http://localhost:3000`. Full integration verification requires the configured database, migration, and Auth settings. Check verified admin setup, an employee joining with a fresh code, shift requests, priority assignment, hour-limit enforcement and override, sign-out, and password reset. Use designated test accounts for onboarding checks.
 
-## Upload to Bitbucket and replace the Vercel app
+## Upload to GitHub and replace the Vercel app
 
-Obtain the actual clone URL of the intended Bitbucket Timesheet repository first. Inspect existing remotes with `git remote -v`; add a separate `bitbucket` remote only if it is not already configured. Replace the placeholder below with the confirmed URL:
+Use the existing `origin` remote, `https://github.com/xhello/timesheet.git`. Fetch its latest history before publishing the prepared replacement branch:
 
 ```sh
-git remote add bitbucket <confirmed-timesheet-clone-url>
-git fetch bitbucket
+git remote -v
+git fetch origin
 git log --oneline --all --decorate -20
 ```
 
 Review the remote history and reconcile any differences. Commit the reviewed replacement files, excluding credentials and local artifacts. Push the replacement branch without rewriting remote history:
 
 ```sh
-git push --set-upstream bitbucket codex/replace-with-scheduler
+git push --set-upstream origin codex/replace-with-scheduler
 ```
 
-Create a pull request into the repository's confirmed production branch. Preserve existing commits; do not force-push or assume the destination branch name.
+Merge the replacement into the branch configured for production in Vercel, using a pull request if the repository requires one. Preserve existing commits and reconcile any intervening changes without force-pushing.
 
-In the **existing Timesheet Vercel project**, connect the confirmed Bitbucket repository and configure:
+The **existing Timesheet Vercel project** is already linked to GitHub `xhello/timesheet`. With access to that project, verify and configure:
 
 - Framework: Next.js; Root Directory: `web`; Node.js: `24.x`.
 - Install command: `npm ci`; build command: `npm run build`.
 - The environment variables above for Production, and Preview when previews need the database. Keep the service-role key server-only.
 - `NEXT_PUBLIC_SITE_URL` matching the actual production/custom domain, with matching Supabase Site URL and redirect allowlist.
 
-Review a preview deployment and its database/authentication behavior before merging to the configured production branch. A preview using the production database can change shared schedule data; use designated test data when validating writes. After production deployment, verify sign-in, schedule loading, and the URL copied by **Copy invite**. No public URL is assigned by this README.
+Review a preview deployment and its database/authentication behavior before merging to the configured production branch. A preview using the production database can change shared schedule data; use designated test data when validating writes. After production deployment, verify sign-in, schedule loading, and the URL copied by **Copy invite**. The existing public address is `https://timesheet-sable.vercel.app`; the replacement uses it after the production deployment succeeds.
 
 ## Data and account transition
 
