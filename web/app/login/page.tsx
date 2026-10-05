@@ -64,7 +64,7 @@ export default async function LoginPage({ searchParams }: {
         <p className={styles.formNote}>Add these environment variables in Vercel, complete the Supabase setup in the README, and redeploy. Keep the service role key in server environment variables only.</p>
       </> : <>
         <h1 id="auth-heading" className={styles.heading}>{employee ? "Employee sign in" : signup ? "Create admin account" : forgot ? "Reset admin password" : "Admin sign in"}</h1>
-        <p className={styles.description}>{employee ? "Enter your phone number to see your schedule and request shifts. No password or verification code is needed." : signup ? "Use your configured admin email. We’ll confirm it before you manage the schedule." : forgot ? "Enter your admin email and we’ll send you a password reset link." : "Use your admin email and password to manage your team."}</p>
+        <p className={styles.description}>{employee ? "Enter your phone number to request shifts. No password or verification code is needed." : signup ? "Use your configured admin email. We’ll confirm it before you manage the schedule." : forgot ? "Enter your admin email and we’ll send you a password reset link." : "Use your admin email and password to manage your team."}</p>
         {messages[status] && <p className={`${styles.notice} ${successStatuses.has(status) ? "" : styles.error}`} role={successStatuses.has(status) ? "status" : "alert"}>{messages[status]}</p>}
         {employee ? <EmployeeLoginForm returnTo={returnTo}/> : <form action={signup ? signUp : forgot ? requestPasswordReset : signIn} className="form-stack">
           <input type="hidden" name="return_to" value={returnTo}/>
@@ -82,6 +82,7 @@ export default async function LoginPage({ searchParams }: {
           </form>
         </>}
         <nav className={styles.links} aria-label="Account options">
+          <Link href="/">View calendar without signing in</Link>
           {employee ? <Link href={href("signin")}>Admin sign in</Link> : <>
             <Link href={href(signup || forgot ? "signin" : "signup")}>{signup || forgot ? "Back to admin sign in" : "Create admin account"}</Link>
             {!forgot && <Link href={href("forgot-password")}>Forgot password?</Link>}

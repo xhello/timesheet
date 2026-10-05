@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
 import { Check, Plus } from 'lucide-react';
 import { addDays, rankedRequests, type Employee, type Shift, type ShiftRequest } from '@/lib/schedule';
 import styles from './shift-board.module.css';
@@ -11,6 +10,7 @@ export type ShiftBoardProps = {
   requests: ShiftRequest[];
   week: string;
   admin: boolean;
+  readOnly?: boolean;
   employeeId?: string;
   published: boolean;
   priorityReady: boolean;
@@ -27,23 +27,20 @@ function formatDate(date: string, options: Intl.DateTimeFormatOptions) {
   return new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
 }
 
-function localToday() {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+function rowTone(shift: Shift) {
+  if (/clean/i.test(shift.label)) return styles.cleaning;
+  if (shift.end <= shift.start) return styles.night;
+  if (shift.start < '12:00') return styles.morning;
+  if (shift.start < '17:00') return styles.afternoon;
+  return styles.evening;
 }
 
-export default function ShiftBoard({ shifts, employees, requests, week, admin, employeeId, published, priorityReady, busy, filter, onRequest, onWithdraw, onOpen, onAssign, onAdd }: ShiftBoardProps) {
-  const boardId = useId();
+export default function ShiftBoard({ shifts, employees, requests, week, admin, readOnly = false, employeeId, published, priorityReady, busy, filter, onRequest, onWithdraw, onOpen, onAssign, onAdd }: ShiftBoardProps) {
   const dates = Array.from({ length: 7 }, (_, index) => addDays(week, index));
-  const firstDay = dates.find(date => shifts.some(shift => shift.date === date)) ?? week;
-  const [selection, setSelection] = useState<{ week: string; date: string; filter: ShiftBoardProps['filter'] } | null>(null);
-  const selectedDay = selection?.week === week && dates.includes(selection.date) ? selection.date : firstDay;
-
   const people = new Map(employees.map(employee => [employee.id, employee]));
   const activeEmployees = employees.filter(employee => employee.active).sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name));
-  const orderedRequests = rankedRequests({ employees, requests });
   const requestsByShift = new Map<string, ShiftRequest[]>();
-  for (const request of orderedRequests) {
+  for (const request of readOnly ? [] : rankedRequests({ employees, requests })) {
     const queue = requestsByShift.get(request.shiftId) ?? [];
     queue.push(request);
     requestsByShift.set(request.shiftId, queue);
@@ -52,108 +49,69 @@ export default function ShiftBoard({ shifts, employees, requests, week, admin, e
     if (filter === 'assigned') return admin ? Boolean(shift.employeeId) : Boolean(employeeId && shift.employeeId === employeeId);
     if (filter === 'requested') return (requestsByShift.get(shift.id) ?? []).some(request => admin || request.employeeId === employeeId);
     return true;
-  }).sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.id.localeCompare(b.id));
+  }).sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+  // Different hours and labels get their own row. Multiple slots with the same
+  // hours remain separate assignments inside the same day cell.
+  const rows = new Map<string, { example: Shift; shifts: Shift[] }>();
+  for (const shift of visibleShifts) {
+    const key = JSON.stringify([shift.start, shift.end, shift.label]);
+    const row = rows.get(key) ?? { example: shift, shifts: [] };
+    row.shifts.push(shift);
+    rows.set(key, row);
+  }
+  const interactive = !readOnly && (admin || Boolean(employeeId));
 
-  // Keep the chosen day during polling. A new personal filter moves to a day
-  // with matching shifts when the selected day has none.
-  useEffect(() => {
-    setSelection(previous => {
-      if (previous?.week === week && previous.filter === filter) return previous;
-      const hasMatches = (date: string) => visibleShifts.some(shift => shift.date === date);
-      if (previous?.week === week && (filter === 'all' || hasMatches(previous.date))) return { ...previous, filter };
-      const today = localToday();
-      return { week, filter, date: dates.includes(today) && (filter === 'all' || hasMatches(today)) ? today : dates.find(hasMatches) ?? firstDay };
-    });
-  }, [week, filter, shifts, requests, employeeId, admin]);
-
-  return <section className={styles.board} aria-label="Weekly shifts">
-    <div className={styles.dayPicker} aria-label="Choose a day">
-      {dates.map(date => {
-        const count = visibleShifts.filter(shift => shift.date === date).length;
-        return <button key={date} type="button" className={`${styles.dayButton} ${date === selectedDay ? styles.selectedDayButton : ''}`}
-          data-testid="day-selector" data-date={date} aria-pressed={date === selectedDay} aria-controls={`${boardId}-${date}`}
-          aria-label={`${formatDate(date, { weekday: 'long', month: 'long', day: 'numeric' })}, ${count} ${count === 1 ? 'shift' : 'shifts'}`}
-          onClick={() => setSelection({ week, date, filter })}>
-          <span>{formatDate(date, { weekday: 'short' })}</span>
-          <strong>{Number(date.slice(-2))}</strong>
-          <span className={`${styles.dayDot} ${count ? styles.hasShifts : ''}`} aria-hidden="true"/>
-        </button>;
-      })}
-    </div>
-
-    <div className={styles.weekGrid}>
-      {dates.map(date => {
-        const dayShifts = visibleShifts.filter(shift => shift.date === date);
-        const dateLabel = formatDate(date, { month: 'short', day: 'numeric' });
-        return <section key={date} id={`${boardId}-${date}`} className={`${styles.day} ${date === selectedDay ? styles.selectedDay : ''}`}
-          data-testid="schedule-day" data-date={date} aria-labelledby={`${boardId}-${date}-heading`}>
-          <header className={styles.dayHeading}>
-            <h3 id={`${boardId}-${date}-heading`}><span>{formatDate(date, { weekday: 'short' })}</span> {dateLabel}</h3>
-            <span className={styles.dayCount}>{dayShifts.length} {dayShifts.length === 1 ? 'shift' : 'shifts'}</span>
-          </header>
-
-          <div className={styles.cards}>
-            {dayShifts.map(shift => {
-              const queue = requestsByShift.get(shift.id) ?? [];
-              const ownRequest = employeeId ? queue.find(request => request.employeeId === employeeId) : undefined;
-              const assignedToYou = Boolean(employeeId && shift.employeeId === employeeId);
-              const assignee = shift.employeeId ? people.get(shift.employeeId)?.name ?? 'Assigned employee' : null;
-              const provisional = !published && shift.source === 'request-priority' && Boolean(shift.employeeId);
-              const heldOpen = !shift.employeeId && shift.requestAssignmentLocked === true;
-              const status = assignee ? provisional ? 'Draft assignment' : published ? 'Assigned' : 'Admin assigned' : heldOpen ? 'Held open' : 'Open shift';
-              const cardLabel = `${shift.label}, ${dateLabel}, ${shift.start}–${shift.end}${shift.end <= shift.start ? ', ends next day' : ''}`;
-              return <article key={shift.id} className={`${styles.card} ${assignedToYou || ownRequest ? styles.yourCard : ''}`}
-                data-testid="shift-card" data-shift-id={shift.id} aria-label={cardLabel}>
-                <div className={styles.shiftHeading}>
-                  <h4>{shift.label}</h4>
-                  <p className={styles.time}>{shift.start}–{shift.end}{shift.end <= shift.start && <span>Next day</span>}</p>
-                </div>
-
-                <div className={styles.assignment}>
-                  {assignee && <strong>{assignedToYou ? 'You' : assignee}</strong>}
-                  <span className={assignedToYou ? styles.yourStatus : styles.status}>{status}</span>
-                </div>
-
-                {queue.length > 0 && <div className={styles.queue} data-testid="request-queue" data-shift-id={shift.id}>
-                  <p>{priorityReady ? 'Requests by priority' : 'Requests · priority pending'}</p>
-                  <ol aria-label={`Request queue for ${shift.label} on ${dateLabel}`}>
-                    {queue.map(request => {
+  return <div className={styles.scroll} data-testid="spreadsheet-scroll" tabIndex={0} role="region" aria-label={`Schedule for week of ${formatDate(week, { month: 'long', day: 'numeric' })}, scroll horizontally for all days`}>
+    <table className={styles.sheet} data-testid="schedule-grid" data-week={week}>
+      <caption className={styles.caption}>Week of {formatDate(week, { month: 'long', day: 'numeric', year: 'numeric' })}</caption>
+      <colgroup><col className={styles.timeColumn}/>{dates.map(date => <col key={date}/>)}</colgroup>
+      <thead><tr><th scope="col" className={styles.corner}>Shift / time</th>{dates.map(date => <th key={date} scope="col" data-date={date}><strong>{formatDate(date, { weekday: 'long' })}</strong><span>{formatDate(date, { month: 'short', day: 'numeric' })}</span></th>)}</tr></thead>
+      <tbody>
+        {[...rows].map(([key, row]) => <tr key={key} className={rowTone(row.example)} data-testid="shift-row">
+          <th scope="row" className={styles.rowHeading}><strong>{row.example.label}</strong><span>{row.example.start}–{row.example.end}</span>{row.example.end <= row.example.start && <small>Ends next day</small>}</th>
+          {dates.map(date => {
+            const dayShifts = row.shifts.filter(shift => shift.date === date);
+            const dateLabel = formatDate(date, { month: 'short', day: 'numeric' });
+            return <td key={date} data-date={date} className={styles.cell}>
+              {dayShifts.length ? dayShifts.map(shift => {
+                const queue = requestsByShift.get(shift.id) ?? [];
+                const ownRequest = employeeId ? queue.find(request => request.employeeId === employeeId) : undefined;
+                const assignedToYou = Boolean(employeeId && shift.employeeId === employeeId);
+                const assignee = shift.employeeId ? people.get(shift.employeeId)?.name ?? 'Assigned employee' : null;
+                const provisional = !published && shift.source === 'request-priority' && Boolean(shift.employeeId);
+                return <div key={shift.id} className={`${styles.slot} ${assignedToYou || ownRequest ? styles.yourSlot : ''}`} data-testid="shift-card" data-shift-id={shift.id} aria-label={`${shift.label}, ${dateLabel}, ${shift.start}–${shift.end}`}>
+                  <div className={styles.assignment}><strong data-testid="assignment-name" className={!assignee ? styles.open : undefined}>{assignee ?? 'Open'}</strong>{assignedToYou && <span className={styles.you}>You</span>}</div>
+                  {!readOnly && provisional && <span className={styles.status}>Draft assignment</span>}
+                  {!readOnly && !shift.employeeId && shift.requestAssignmentLocked && <span className={styles.status}>Held open</span>}
+                  {!!queue.length && <div className={styles.queue} data-testid="request-queue" data-shift-id={shift.id}>
+                    <p>{priorityReady ? 'Requests' : 'Requests · priority pending'}</p>
+                    <ol aria-label={`Request queue for ${shift.label} on ${dateLabel}`}>{queue.map(request => {
                       const person = people.get(request.employeeId);
                       const own = request.employeeId === employeeId;
-                      const selected = shift.employeeId === request.employeeId;
                       return <li key={request.id} data-employee-id={request.employeeId} className={own ? styles.yourRequest : undefined}>
                         <span className={styles.rank} aria-label={priorityReady && person ? `Priority ${person.priority}` : 'Priority not set'}>{priorityReady && person ? `#${person.priority}` : '—'}</span>
                         <span className={styles.requestName}>{person?.name ?? 'Employee'}{own && <span className={styles.you}> (you)</span>}</span>
-                        {selected && <Check size={14} className={styles.selectedCheck} role="img" aria-label={provisional ? 'Draft assignment' : 'Assigned'}/>}
+                        {shift.employeeId === request.employeeId && <Check size={13} className={styles.selectedCheck} role="img" aria-label={provisional ? 'Draft assignment' : 'Assigned'}/>}
                       </li>;
-                    })}
-                  </ol>
-                </div>}
-
-                <div className={styles.actions}>
-                  {admin && <label className={styles.assignLabel}>
-                    <span>Assign</span>
-                    <select value={shift.employeeId ?? ''} disabled={busy} data-testid="inline-assignee" data-shift-id={shift.id}
-                      aria-label={`Assign ${shift.label} on ${dateLabel}`} onChange={event => onAssign(shift, event.target.value || null)}>
+                    })}</ol>
+                  </div>}
+                  {interactive && <div className={styles.actions}>
+                    {admin && <select value={shift.employeeId ?? ''} disabled={busy} data-testid="inline-assignee" data-shift-id={shift.id} aria-label={`Assign ${shift.label} on ${dateLabel}`} onChange={event => onAssign(shift, event.target.value || null)}>
                       <option value="">Open</option>
                       {shift.employeeId && !activeEmployees.some(person => person.id === shift.employeeId) && <option value={shift.employeeId}>{assignee}</option>}
                       {activeEmployees.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}
-                    </select>
-                  </label>}
-                  {!admin && !published && <button type="button" className={`${styles.actionButton} ${ownRequest ? styles.cancelButton : styles.requestButton}`}
-                    disabled={busy} data-testid={ownRequest ? 'cancel-request' : 'request-shift'} data-shift-id={shift.id}
-                    aria-label={`${ownRequest ? 'Cancel request for' : 'Request'} ${shift.label} on ${dateLabel}`}
-                    onClick={() => ownRequest ? onWithdraw(ownRequest) : onRequest(shift)}>{ownRequest ? 'Cancel request' : 'Request shift'}</button>}
-                  <button type="button" className={styles.detailsButton} disabled={busy} data-testid="shift-details" data-shift-id={shift.id}
-                    aria-label={`Details for ${shift.label} on ${dateLabel}`} onClick={() => onOpen(shift)}>Details</button>
-                </div>
-              </article>;
-            })}
-            {!dayShifts.length && <p className={styles.emptyDay}>{filter === 'assigned' ? admin ? 'No assigned shifts.' : 'No shifts assigned to you.' : filter === 'requested' ? admin ? 'No requested shifts.' : 'No requests from you.' : 'No shifts.'}</p>}
-          </div>
-          {admin && onAdd && <button type="button" className={styles.addButton} disabled={busy} aria-label={`Add shift on ${dateLabel}`} onClick={() => onAdd(date)}><Plus size={15}/> Add shift</button>}
-        </section>;
-      })}
-    </div>
-  </section>;
+                    </select>}
+                    {!admin && !published && <button type="button" className={`${styles.actionButton} ${ownRequest ? styles.cancelButton : styles.requestButton}`} disabled={busy} data-testid={ownRequest ? 'cancel-request' : 'request-shift'} data-shift-id={shift.id} aria-label={`${ownRequest ? 'Cancel request for' : 'Request'} ${shift.label} on ${dateLabel}`} onClick={() => ownRequest ? onWithdraw(ownRequest) : onRequest(shift)}>{ownRequest ? 'Cancel request' : 'Request shift'}</button>}
+                    <button type="button" className={styles.detailsButton} disabled={busy} data-testid="shift-details" data-shift-id={shift.id} aria-label={`Details for ${shift.label} on ${dateLabel}`} onClick={() => onOpen(shift)}>Details</button>
+                  </div>}
+                </div>;
+              }) : <span className={styles.emptyCell} aria-label="No shift">—</span>}
+            </td>;
+          })}
+        </tr>)}
+        {!rows.size && <tr><td colSpan={8} className={styles.empty}>{filter === 'assigned' ? 'No shifts assigned to you this week.' : filter === 'requested' ? 'No requests from you this week.' : 'No shifts this week.'}</td></tr>}
+      </tbody>
+      {admin && !readOnly && onAdd && <tfoot><tr><th scope="row" className={styles.corner}><span className={styles.footerLabel}>Add a shift</span></th>{dates.map(date => <td key={date}><button type="button" className={styles.addButton} disabled={busy} aria-label={`Add shift on ${formatDate(date, { month: 'short', day: 'numeric' })}`} onClick={() => onAdd(date)}><Plus size={14}/> Add</button></td>)}</tr></tfoot>}
+    </table>
+  </div>;
 }

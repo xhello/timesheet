@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
-  // This app serves private schedules and authentication forms. Never cache a
+  // Public calendars and signed-in controls share these routes. Never cache a
   // response carrying a user's session, including redirects and server actions.
   response.headers.set("Cache-Control", "private, no-cache, no-store, must-revalidate, max-age=0");
   response.headers.set("Pragma", "no-cache");

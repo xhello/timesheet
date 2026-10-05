@@ -33,19 +33,30 @@ function canSetUpWorkspace(user:CurrentUser) {
  const adminEmail=process.env.ADMIN_EMAIL?.trim().toLowerCase();
  return user.authType==='email'&&!!adminEmail&&user.emailVerified===true&&user.email.trim().toLowerCase()===adminEmail;
 }
-function view(state:State|null,version:number,user:CurrentUser) {
- if(!state) return {role:canSetUpWorkspace(user)?'setup':'guest',version,userName:user.displayName};
+function publicView(state:State|null,version:number) {
+ const assignedIds=new Set(state?.shifts.flatMap(shift=>shift.employeeId?[shift.employeeId]:[])??[]);
+ return {role:'public',userName:'',version,priorityConfirmed:false,notes:[],requests:[],settings:workHourSettings({}),
+  weeks:Object.fromEntries(Object.entries(state?.weeks??{}).filter(([week,status])=>/^\d{4}-\d{2}-\d{2}$/.test(week)&&(status==='draft'||status==='published'))),
+  employees:state?.employees.filter(employee=>assignedIds.has(employee.id)).map(employee=>({id:employee.id,name:employee.name,hireDate:'',priority:0,active:true}))??[],
+  shifts:state?.shifts.map(shift=>({id:shift.id,date:shift.date,start:shift.start,end:shift.end,label:shift.label,employeeId:shift.employeeId,source:shift.source}))??[]};
+}
+function view(state:State|null,version:number,user:CurrentUser|null) {
+ if(!user)return publicView(state,version);
+ if(!state) return canSetUpWorkspace(user)?{role:'setup',version,userName:user.displayName}:publicView(state,version);
  const admin=canSetUpWorkspace(user)&&state.ownerId===user.userId; const employee=user.authType==='phone'?state.employees.find(e=>e.id===user.employeeId&&e.phone&&e.phoneVersion===user.phoneVersion&&e.active):undefined;
- if(!admin&&!employee) return {role:'guest',version,userName:user.displayName};
+ if(!admin&&!employee) return publicView(state,version);
  return {role:admin?'admin':'employee',userName:user.displayName,employeeId:employee?.id,version,priorityConfirmed:state.priorityConfirmed,notes:admin?state.notes:[],weeks:state.weeks,settings:workHourSettings(state),
   employees:state.employees.map(e=>({id:e.id,name:e.name,active:e.active,hireDate:admin?e.hireDate:'',priority:e.priority,phone:admin?(e.phone??''):undefined,connected:admin?!!e.phone:undefined})),
-  shifts:state.shifts.map(s=>admin?s:state.weeks[weekOf(s.date)]==='published'||s.source==='request-priority'?{...s,note:undefined}:{...s,employeeId:null,source:'draft',note:undefined,hourLimitOverride:undefined}),
+  shifts:state.shifts.map(s=>admin?s:{id:s.id,date:s.date,start:s.start,end:s.end,label:s.label,employeeId:s.employeeId,source:s.source,hourLimitOverride:s.hourLimitOverride,requestAssignmentLocked:s.requestAssignmentLocked}),
   requests:rankedRequests(state).filter(r=>state.shifts.some(s=>s.id===r.shiftId)).map(r=>({id:r.id,shiftId:r.shiftId,employeeId:r.employeeId,createdAt:r.createdAt,note:admin||r.employeeId===employee!.id?r.note:''}))};
 }
-export async function GET(){try{const user=await getCurrentUser();if(!user)return json({error:'Sign in to access the schedule.'},401);if(user.authType==='email'&&!user.emailVerified)return json({error:'Verify your email before accessing the schedule.'},403);const saved=await readState();return json(view(saved?.state??null,saved?.version??0,user));}catch(e){console.error('Schedule read failed',e);return json({error:'Your schedule could not load. Please try again.'},503);}}
+async function currentUserOrNull():Promise<CurrentUser|null> {
+ try{return await getCurrentUser();}catch{return null;}
+}
+export async function GET(){try{const user=await currentUserOrNull();const saved=await readState();return json(view(saved?.state??null,saved?.version??0,user));}catch(e){console.error('Schedule read failed',e);return json({error:'Your schedule could not load. Please try again.'},503);}}
 export async function POST(req:Request){try{
  if(!isSameOriginRequest(req))fail('Request origin is not allowed.',403);
- const user=await getCurrentUser();if(!user)fail('Sign in to continue.',401);
+ const user=await currentUserOrNull();if(!user)fail('Sign in to continue.',401);
  if(user.authType==='email'&&!user.emailVerified)fail('Verify your email before accessing the schedule.',403);
  let raw:unknown;try{raw=await req.json();}catch{fail('Send a valid JSON request.');}
  const parsed=input.safeParse(raw);if(!parsed.success)fail(parsed.error.issues[0]?.message??'Check your input.');const a=parsed.data;

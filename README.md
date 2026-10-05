@@ -7,10 +7,11 @@ The replacement is merged into `main` in the [GitHub Timesheet repository](https
 ## Included
 
 - Sunday–Saturday Front Desk schedule, including overnight and hotel-cleaning shifts.
+- Public spreadsheet-style calendar with weeks stacked vertically, newest first, and names visible without signing in.
 - Employee shift preferences, custom admin priority, and optional hire-date seniority sorting.
 - Live priority-based assignments when employees request shifts, with ranked requester lists visible to the team.
 - Manual assignment and move controls that take precedence over automatic requests.
-- One-tap employee requests and cancellation, inline admin assignment, and a daily view on phones.
+- One-tap employee requests and cancellation, inline admin assignment, and horizontally scrollable weekly grids on phones.
 - Create a week from any earlier week's shifts, with optional employee assignments, or use standard shifts.
 - Configurable daily/weekly limits, defaulting to 8 and 40 hours, with explicit admin overrides.
 - Verified email/password sign-in for the admin; employees sign in using their registered phone number alone.
@@ -23,7 +24,7 @@ Production reuses the existing Timesheet Supabase project and its original keys.
 
 Production has the migrations in `supabase/migrations/` applied. For a fresh environment, run them in filename order in the project's SQL Editor. `0001_workspace.sql` creates the private scheduler store. `0002_employee_login_rate_limits.sql` adds shared login counters and a server-only rate-limit function. These additions do not change Timesheet attendance tables or import their records. If the table already exists, inspect its schema and data before making changes.
 
-The scheduling table enables Row Level Security and revokes access from anonymous and authenticated browser clients. The server accesses it using the service role and enforces application permissions. Existing Timesheet tables and their policies remain unchanged.
+The scheduling table enables Row Level Security and revokes direct access from anonymous and authenticated browser clients. The server accesses it using the service role, returns an explicitly limited public calendar, and enforces application permissions for all changes. Existing Timesheet tables and their policies remain unchanged.
 
 The old destructive `supabase/schema.sql` was removed from this branch and remains in Git history at `f9e735c`. **Do not run it against the reused database:** it drops Timesheet tables with `CASCADE`.
 
@@ -103,13 +104,15 @@ Phone-only access is intentional: anyone who knows a registered number can sign 
 
 ## Shift requests and priority
 
-To create next week's schedule, navigate to an empty week and select **Create this week**. **Copy from** defaults to the previous week when available; choose any earlier saved week or **Standard shifts**. Copying keeps the shift names, times, and weekdays. **Include assigned employees** is optional and off by default; missing or inactive employees leave open shifts. The new week starts as a draft with fresh requests. Existing weeks stay unchanged. Copied assignments are checked against current hour limits and neighboring overnight shifts, and any exceptions require fresh admin approval.
+Anyone can open the app's home page to view every saved week, including draft and published assignments. The calendar follows the source spreadsheet: shift names and times down the left, Sunday–Saturday dates across the top, and newer weeks above older weeks. On phones, swipe horizontally within a week and scroll vertically between weeks. Public responses contain calendar fields and assigned names only; employee phone numbers, hire dates, priority, private notes, and request queues are excluded. Signing out returns to this public calendar. Registered employees sign in to request shifts; only the admin can edit the schedule.
+
+Select **Create next week**, or use **Jump to week** to reach an empty week and select **Create this week**. **Copy from** defaults to the previous week when available; choose any earlier saved week or **Standard shifts**. Copying keeps the shift names, times, and weekdays. **Include assigned employees** is optional and off by default; missing or inactive employees leave open shifts. The new week starts as a draft with fresh requests. Existing weeks stay unchanged. Copied assignments are checked against current hour limits and neighboring overnight shifts, and any exceptions require fresh admin approval.
 
 Choose a complete order under **Team** before automatic request assignment begins. **Use this order** confirms the displayed initial order; moving an employee up or down saves immediately. For each open draft shift, the highest-priority eligible requester is provisionally assigned immediately. A later request from a higher-priority employee can replace that provisional assignment; withdrawal promotes the next eligible requester. Priority changes and work-hour setting changes also recalculate draft request assignments. Overlapping shifts and daily/weekly hour limits remain enforced automatically. Requests that cannot be assigned stay in the queue.
 
 Employees see everyone requesting a shift in priority order, including provisional assignments before publication. Each employee's request notes remain visible only to that employee and the admin. Phone numbers and hire dates remain admin-only. The schedule refreshes periodically while users are not editing.
 
-Employees request or cancel directly on a shift card, with optional notes under **Details**. Filters show all shifts, personal assignments, or personal requests. Phones show one day at a time with a day selector; desktops show the week. Admins assign employees directly on cards, with moves, time changes, and exceptions under Details. Publishing and reopening take one click unless hour-limit overrides need explicit approval.
+Employees request or cancel directly in a calendar cell, with optional notes under **Details**. Filters show all shifts, personal assignments, or personal requests across saved weeks. Admins assign employees directly in cells, with moves, time changes, and exceptions under Details. Each week's controls affect that week. Publishing and reopening take one click unless hour-limit overrides need explicit approval.
 
 Imported assignments, manual assignments, and published weeks are preserved. Explicitly clearing or moving an assignment holds the vacated shift open; **Auto-assign** under **More actions** includes those open shifts again. Publishing freezes the week's results; reopen it to collect and recalculate requests.
 

@@ -22,12 +22,12 @@ const employee = { userId: 'employee:employee-id', employeeId: 'employee-id', ph
 const seed = { employees: [{ id: 'employee-id', name: 'Employee', hireDate: '', priority: 1, active: true, userId: 'old-chatgpt-user', codeHash: 'old-code', codeExpires: 999 }], shifts: [], notes: [] };
 const initial = () => ({ ownerId: admin.userId, ownerName: admin.displayName, employees: [{ ...seed.employees[0], phone: '+16045550123', phoneVersion: employee.phoneVersion }], shifts: [], requests: [], weeks: {}, imported: true, priorityConfirmed: false, notes: [] });
 
-function harness({ user = admin, saved = null, env = { ADMIN_EMAIL: admin.email }, imported = seed, conflict = false } = {}) {
+function harness({ user = admin, saved = null, env = { ADMIN_EMAIL: admin.email }, imported = seed, conflict = false, authError = null } = {}) {
   let snapshot = structuredClone(saved);
   let writes = 0;
   const origin = load('../app/auth/origin.ts', { 'server-only': {}, 'next/headers': {} }, env);
   const route = load('../app/api/workspace/route.ts', {
-    '@/lib/auth': { getCurrentUser: async () => user },
+    '@/lib/auth': { getCurrentUser: async () => { if(authError)throw authError; return user; } },
     '@/app/auth/origin': origin,
     '@/lib/schedule': schedule,
     '@/lib/phone': phone,
@@ -44,14 +44,14 @@ const request = (body, origin = 'https://schedule.example.test', extra = {}) => 
 
 test('forged legacy identity headers cannot authenticate a workspace request', async () => {
   const app = harness({ user: null });
-  assert.equal((await app.GET()).status, 401);
+  assert.equal((await (await app.GET()).json()).role, 'public');
   assert.equal((await app.POST(request({ action: 'setup' }, 'https://schedule.example.test', { 'oai-authenticated-user-id': admin.userId, 'oai-authenticated-user-email': admin.email }))).status, 401);
   assert.equal(app.writes(), 0);
 });
 
-test('unverified users cannot read or mutate the workspace', async () => {
+test('unverified users receive only the public calendar and cannot mutate the workspace', async () => {
   const app = harness({ user: { ...admin, emailVerified: false } });
-  assert.equal((await app.GET()).status, 403);
+  assert.equal((await (await app.GET()).json()).role, 'public');
   assert.equal((await app.POST(request({ action: 'setup' }))).status, 403);
   assert.equal(app.writes(), 0);
 });
@@ -59,7 +59,7 @@ test('unverified users cannot read or mutate the workspace', async () => {
 test('only the configured admin receives setup and can initialize storage', async () => {
   for (const options of [{ user: employee }, { env: {} }, { env: { ADMIN_EMAIL: '   ' } }]) {
     const app = harness(options);
-    assert.equal((await (await app.GET()).json()).role, 'guest');
+    assert.equal((await (await app.GET()).json()).role, 'public');
     assert.equal((await app.POST(request({ action: 'setup' }))).status, 403);
     assert.equal(app.writes(), 0);
   }
@@ -145,7 +145,7 @@ test('old employee email bindings and obsolete invite actions no longer grant ac
   const state = initial();
   state.employees[0].userId = 'legacy-user';
   const app = harness({ user: { ...admin, userId: 'legacy-user', email: 'employee@example.test' }, saved: { state, version: 0 } });
-  assert.equal((await (await app.GET()).json()).role, 'guest');
+  assert.equal((await (await app.GET()).json()).role, 'public');
   for (const action of [{ action: 'join', code: 'old-code' }, { action: 'code', employeeId: 'employee-id' }]) {
     assert.equal((await app.POST(request({ ...action, version: 0 }))).status, 400);
   }
@@ -167,7 +167,7 @@ test('admin normalizes unique phone numbers and revokes sessions after changing 
   assert.notEqual(saved.state.employees[0].phoneVersion, employee.phoneVersion);
   assert.equal((await changed.json()).employees[0].phone, '+16045550124');
   const revoked = harness({ user: employee, saved });
-  assert.equal((await (await revoked.GET()).json()).role, 'guest');
+  assert.equal((await (await revoked.GET()).json()).role, 'public');
   assert.equal((await revoked.POST(request({ action: 'request', shiftId: 'any', note: '', version: 1 }))).status, 403);
   const version = saved.state.employees[0].phoneVersion;
   assert.equal((await app.POST(request({ ...action, phone: '', version: 1 }))).status, 200);
@@ -285,7 +285,7 @@ test('hour-limit changes re-evaluate automatic requests without changing fixed a
   const member = harness({ user: employee, saved: app.snapshot() });
   const data = await (await member.GET()).json();
   assert.equal(data.shifts[0].employeeId, 'junior');
-  assert.equal(data.shifts[1].employeeId, null);
+  assert.equal(data.shifts[1].employeeId, employee.employeeId);
   assert.equal(data.shifts[1].note, undefined);
 });
 
@@ -452,4 +452,103 @@ test('both copied and template weeks enforce the total shift cap without partial
   const exact=harness({saved:{state,version:0}});
   assert.equal((await exact.POST(request({action:'week',week:'2026-10-25',version:0}))).status,200);
   assert.equal(exact.snapshot().state.shifts.length,10000);
+});
+
+function publicCalendarState(){
+  const state=initial();
+  state.ownerName='Private owner name';state.notes=['Private workspace note'];state.priorityConfirmed=true;
+  state.settings={dailyMaxHours:6,weeklyMaxHours:30};
+  state.employees[0].hireDate='2020-02-03';state.employees[0].priority=7;
+  state.employees.push({id:'other',name:'Other calendar employee',active:false,hireDate:'2021-04-05',priority:2,phone:'+16045550888',phoneVersion:'private-phone-token',codeHash:'private-legacy-token'});
+  state.employees.push({id:'unassigned',name:'Private unused roster entry',active:true,hireDate:'2022-05-06',priority:1,phone:'+16045550777'});
+  state.shifts=[
+    {id:'manual-draft',date:'2026-10-11',start:'08:00',end:'12:00',label:'Front desk',employeeId:employee.employeeId,source:'manual',note:'Private shift note',hourLimitOverride:true,requestAssignmentLocked:true,privateMetadata:'Private extra metadata'},
+    {id:'copied-draft',date:'2026-10-12',start:'13:00',end:'17:00',label:'Afternoon',employeeId:'other',source:'copy'},
+    {id:'live-draft',date:'2026-10-13',start:'17:00',end:'22:00',label:'Evening',employeeId:employee.employeeId,source:'request-priority'},
+    {id:'published',date:'2026-10-18',start:'22:00',end:'06:00',label:'Overnight',employeeId:'other',source:'imported',note:'Private published shift note'},
+    {id:'open',date:'2026-10-19',start:'08:00',end:'12:00',label:'Open duty',employeeId:null,source:'template'},
+  ];
+  state.weeks={'2026-10-11':'draft','2026-10-18':'published','internal-note':'Private week metadata'};
+  state.requests=[
+    {id:'own-private-request-id',shiftId:'manual-draft',employeeId:employee.employeeId,createdAt:'2026-10-01',note:'Private own request note'},
+    {id:'other-private-request-id',shiftId:'manual-draft',employeeId:'unassigned',createdAt:'2026-10-02',note:'Private coworker request note'},
+  ];
+  return state;
+}
+
+test('anonymous calendar uses an explicit public whitelist including draft assignees without private roster or request data',async()=>{
+  const state=publicCalendarState(),saved={state,version:12},app=harness({user:null,saved});
+  const response=await app.GET();
+  assert.equal(response.status,200);
+  assert.equal(response.headers.get('cache-control'),'no-store');
+  const data=await response.json();
+  assert.deepEqual(Object.keys(data).sort(),['employees','notes','priorityConfirmed','requests','role','settings','shifts','userName','version','weeks']);
+  assert.equal(data.role,'public');assert.equal(data.userName,'');assert.equal(data.version,12);
+  assert.equal(data.priorityConfirmed,false);
+  assert.deepEqual(data.requests,[]);assert.deepEqual(data.notes,[]);
+  assert.deepEqual(data.settings,{dailyMaxHours:8,weeklyMaxHours:40});
+  assert.deepEqual(data.weeks,{'2026-10-11':'draft','2026-10-18':'published'});
+  assert.deepEqual(data.employees,[{id:employee.employeeId,name:'Employee',hireDate:'',priority:0,active:true},{id:'other',name:'Other calendar employee',hireDate:'',priority:0,active:true}]);
+  assert.deepEqual(data.shifts,state.shifts.map(({id,date,start,end,label,employeeId,source})=>({id,date,start,end,label,employeeId,source})));
+  const text=JSON.stringify(data);
+  for(const privateValue of ['Private','private-',state.ownerId,state.employees[0].phone,state.employees[0].hireDate,'old-chatgpt-user','old-code'])assert.ok(!text.includes(privateValue),privateValue);
+  assert.equal(app.writes(),0);assert.deepEqual(app.snapshot(),saved);
+});
+
+test('anonymous requests to every mutation action remain unauthorized despite public calendar access',async()=>{
+  const saved={state:publicCalendarState(),version:2},app=harness({user:null,saved});
+  for(const action of ['setup','employee','priority','settings','assign','move','shift','deleteShift','request','withdraw','auto','week','publish']){
+    const response=await app.POST(request({action,version:2},'https://schedule.example.test',{'oai-authenticated-user-id':admin.userId,'oai-authenticated-user-email':admin.email}));
+    assert.equal(response.status,401,action);
+  }
+  assert.equal(app.writes(),0);assert.deepEqual(app.snapshot(),saved);
+});
+
+test('invalid, revoked, unverified, and nonmember identities fall back to the same public projection',async()=>{
+  const saved={state:publicCalendarState(),version:2};
+  const expected=await (await harness({user:null,saved}).GET()).json();
+  const cases=[
+    {user:null},
+    {authError:new Error('Invalid session'),user:admin},
+    {user:{...employee,phoneVersion:'revoked-version'}},
+    {user:{...employee,employeeId:'other'}},
+    {user:{...admin,emailVerified:false}},
+    {user:{...admin,userId:'nonowner',email:'other@example.test'}},
+  ];
+  for(const options of cases){
+    const app=harness({...options,saved});
+    const response=await app.GET();
+    assert.equal(response.status,200);
+    assert.deepEqual(await response.json(),expected);
+    assert.equal(app.writes(),0);
+  }
+  const broken=harness({saved,authError:new Error('Invalid session')});
+  assert.equal((await broken.POST(request({action:'settings',dailyMaxHours:8,weeklyMaxHours:40,version:2}))).status,401);
+  assert.equal(broken.writes(),0);
+});
+
+test('an uninitialized calendar returns a usable empty public shape without exposing the imported seed',async()=>{
+  const app=harness({user:null});
+  assert.deepEqual(await (await app.GET()).json(),{role:'public',userName:'',version:0,priorityConfirmed:false,notes:[],requests:[],settings:{dailyMaxHours:8,weeklyMaxHours:40},weeks:{},employees:[],shifts:[]});
+  assert.equal(app.writes(),0);
+  assert.equal((await (await harness().GET()).json()).role,'setup');
+});
+
+test('signed-in employee calendars include manual and copied drafts while private notes remain owner/admin only',async()=>{
+  const state=publicCalendarState(),saved={state,version:2};
+  const member=harness({user:employee,saved});
+  const data=await (await member.GET()).json();
+  assert.equal(data.role,'employee');
+  assert.deepEqual(data.shifts.map(s=>[s.id,s.employeeId,s.source]),state.shifts.map(s=>[s.id,s.employeeId,s.source]));
+  assert.ok(data.shifts.every(s=>s.note===undefined));
+  assert.ok(data.shifts.every(s=>s.privateMetadata===undefined));
+  assert.deepEqual(data.notes,[]);
+  assert.equal(data.requests.find(r=>r.id==='own-private-request-id').note,'Private own request note');
+  assert.equal(data.requests.find(r=>r.id==='other-private-request-id').note,'');
+  assert.ok(data.employees.every(e=>e.phone===undefined&&e.phoneVersion===undefined&&e.hireDate===''));
+  const owner=await (await harness({saved}).GET()).json();
+  assert.equal(owner.role,'admin');
+  assert.deepEqual(owner.notes,state.notes);
+  assert.equal(owner.shifts[0].note,'Private shift note');
+  assert.equal(owner.requests.find(r=>r.id==='other-private-request-id').note,'Private coworker request note');
 });

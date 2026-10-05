@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CalendarDays, Users, Settings, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Plus, Sparkles, Check, ExternalLink, RefreshCw, MoreHorizontal, LockKeyhole } from 'lucide-react';
+import { CalendarDays, Users, Settings, ArrowUp, ArrowDown, Plus, Sparkles, Check, ExternalLink, RefreshCw, MoreHorizontal } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
@@ -18,7 +18,7 @@ import WorkHourSettingsPanel from './work-hour-settings';
 import EmployeeAccessLink from './employee-access-link';
 import { assignmentHourIssues, workHourSettings, weekHourIssues, hourIssueText, overlaps, planWeekCopy, type WorkHourSettings, INITIAL_WEEK, SOURCE_URL, addDays, weekOf, type Employee, type Shift, type ShiftRequest } from '@/lib/schedule';
 
-type Data = {role:'setup'|'guest'|'admin'|'employee';version:number;userName:string;employeeId?:string;employees:(Employee & {connected?:boolean})[];shifts:Shift[];requests:ShiftRequest[];weeks:Record<string,string>;priorityConfirmed:boolean;notes:string[];settings:WorkHourSettings};
+type Data = {role:'public'|'setup'|'guest'|'admin'|'employee';version:number;userName:string;employeeId?:string;employees:(Employee & {connected?:boolean})[];shifts:Shift[];requests:ShiftRequest[];weeks:Record<string,string>;priorityConfirmed:boolean;notes:string[];settings:WorkHourSettings};
 type Modal = {kind:'assignment'|'employee'|'shift'|'editShift'|'week';shift?:Shift;employee?:Employee;date?:string};
 type ShiftFilter = 'all'|'assigned'|'requested';
 const fmt=(date:string,opts:Intl.DateTimeFormatOptions={month:'short',day:'numeric'})=>new Intl.DateTimeFormat('en-US',{...opts,timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));
@@ -57,6 +57,7 @@ export default function Scheduler(){
  const [data,setData]=useState<Data|null>(null);
  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
  const [week,setWeek]=useState(INITIAL_WEEK),[tab,setTabState]=useState('schedule'),[filter,setFilter]=useState<ShiftFilter>('all');
+ const [jumpTarget,setJumpTarget]=useState<string|null>(null);
  const [modal,setModal]=useState<Modal|null>(null);
  const [confirm,setConfirm]=useState<{title:string;description:string;action:Record<string,unknown>}|null>(null);
  const [priority,setPriority]=useState<string[]>([]),[priorityDirty,setPriorityDirty]=useState(false);
@@ -69,11 +70,13 @@ export default function Scheduler(){
  const latest=useRef(data);latest.current=data;
  const priorityUnsaved=useRef(false);priorityUnsaved.current=priorityDirty;
  const editing=useRef(false);editing.current=!!modal||!!confirm||priorityDirty||busy||tab==='settings';
- const reading=useRef(false),mutating=useRef(false),refreshEpoch=useRef(0);
+ const reading=useRef(false),mutating=useRef(false),refreshEpoch=useRef(0),initialWeekSelected=useRef(false);
 
  useEffect(()=>{setOverrideHourLimits(false);},[employeeId,moveId,modal?.shift?.id]);
  useEffect(()=>{setOverridePublishHours(false);},[confirm]);
  useEffect(()=>{setCopyAllowOverlap(false);setCopyOverrideHours(false);},[copySource,copyAssignments,modal?.kind==='week'?modal.date:undefined,data?.version]);
+ useEffect(()=>{if(jumpTarget)document.getElementById(`week-${jumpTarget}`)?.scrollIntoView({block:'start',behavior:'smooth'});},[jumpTarget]);
+ useEffect(()=>{setModal(null);setConfirm(null);setNote('');setFilter('all');setTabState('schedule');},[data?.role,data?.employeeId]);
  const setTab=(next:string)=>{if(next!==tab){setSettingsSnapshot(next==='settings'?workHourSettings(latest.current??{}):null);setTabState(next);}};
  const refresh=useCallback(async()=>{
   if(reading.current||mutating.current||editing.current)return;
@@ -84,6 +87,10 @@ export default function Scheduler(){
    if(epoch!==refreshEpoch.current||mutating.current||editing.current)return;
    if(!response.ok)throw new Error(updated.error??'Could not load the schedule.');
    setError('');
+   if(!initialWeekSelected.current){
+    const savedWeeks=Array.from(new Set([...(updated.shifts??[]).map(shift=>weekOf(shift.date)),...Object.keys(updated.weeks??{})])).sort().reverse();
+    setWeek(savedWeeks[0]??INITIAL_WEEK);initialWeekSelected.current=true;
+   }
    if(latest.current?.version===updated.version&&latest.current?.role===updated.role&&latest.current?.employeeId===updated.employeeId&&latest.current?.userName===updated.userName)return;
    latest.current=updated;setData(updated);
    if(updated.employees){setPriority(orderedIds(updated.employees));setPriorityDirty(false);}
@@ -143,6 +150,8 @@ export default function Scheduler(){
  },[]);
  const openShift=useCallback((shift:Shift,selectedEmployeeId?:string|null,showAdvanced=false)=>{
   const current=latest.current;
+  if(current?.role!=='admin'&&current?.role!=='employee')return;
+  setWeek(weekOf(shift.date));
   setEmployeeId(selectedEmployeeId===undefined?shift.employeeId??'none':selectedEmployeeId??'none');
   setRequestEmployeeId(shift.employeeId??'none');setMoveId('none');setAllowOverlap(false);setOverrideHourLimits(false);setAdvanced(showAdvanced);
   const noteOwner=current?.role==='admin'?shift.employeeId:current?.employeeId;
@@ -154,18 +163,26 @@ export default function Scheduler(){
   const lifecycle=new AbortController();
   const register=(tool:any)=>{try{Promise.resolve(context.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}};
   register({name:'read_shift_schedule',title:'Read shift schedule',description:'Read the visible schedule and permitted requests. No changes.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute:()=>({role:latest.current?.role,shifts:latest.current?.shifts,requests:latest.current?.requests})});
-  register({name:'start_shift_edit',title:'Open shift details',description:'Open a shift for review or editing. Does not save changes.',inputSchema:{type:'object',properties:{shiftId:{type:'string'}},required:['shiftId'],additionalProperties:false},annotations:{readOnlyHint:false},execute:(input:unknown)=>{const shift=latest.current?.shifts?.find(shift=>shift.id===(input as {shiftId?:string})?.shiftId);if(!shift)throw new Error('Shift not found.');openShift(shift);return {openedShiftId:shift.id};}});
+  register({name:'start_shift_edit',title:'Open shift details',description:'Open a shift for review or editing. Does not save changes.',inputSchema:{type:'object',properties:{shiftId:{type:'string'}},required:['shiftId'],additionalProperties:false},annotations:{readOnlyHint:false},execute:(input:unknown)=>{if(latest.current?.role!=='admin'&&latest.current?.role!=='employee')throw new Error('Sign in to request or edit a shift.');const shift=latest.current?.shifts?.find(shift=>shift.id===(input as {shiftId?:string})?.shiftId);if(!shift)throw new Error('Shift not found.');openShift(shift);return {openedShiftId:shift.id};}});
   return()=>lifecycle.abort();
  },[openShift]);
 
- const admin=data?.role==='admin',employees=data?.employees??[];
- const shifts=(data?.shifts??[]).filter(shift=>weekOf(shift.date)===week);
- const requests=(data?.requests??[]).filter(request=>shifts.some(shift=>shift.id===request.shiftId));
+ const admin=data?.role==='admin',employee=data?.role==='employee',employees=data?.employees??[];
+ const canInteract=admin||employee,readOnly=!canInteract;
+ const shifts=data?.shifts??[],requests=data?.requests??[];
  const ownRequests=requests.filter(request=>request.employeeId===data?.employeeId);
- const published=data?.weeks?.[week]==='published';
+ const savedWeeks=Array.from(new Set([...shifts.map(shift=>weekOf(shift.date)),...Object.keys(data?.weeks??{})])).sort().reverse();
+ const calendarWeeks=Array.from(new Set([...savedWeeks,...(jumpTarget?[jumpTarget]:[]),...(!savedWeeks.length&&admin?[week]:[])])).sort().reverse();
+ const nextWeek=savedWeeks.length?addDays(savedWeeks[0],7):INITIAL_WEEK;
+ const modalWeek=modal?.shift?weekOf(modal.shift.date):modal?.date?weekOf(modal.date):week;
+ const modalPublished=data?.weeks?.[modalWeek]==='published';
+ const modalWeekShifts=shifts.filter(shift=>weekOf(shift.date)===modalWeek);
+ const modalRequests=requests.filter(request=>modalWeekShifts.some(shift=>shift.id===request.shiftId));
  const activeEmployees=employees.filter(employee=>employee.active);
  const priorityReady=!!data?.priorityConfirmed&&activeEmployees.length>0&&activeEmployees.every(employee=>Number.isSafeInteger(employee.priority)&&employee.priority>0)&&new Set(activeEmployees.map(employee=>employee.priority)).size===activeEmployees.length;
- const hourSettings=workHourSettings(data??{}),weekIssues=admin&&data?weekHourIssues(data,week):[];
+ const hourSettings=workHourSettings(data??{});
+ const confirmWeek=typeof confirm?.action.week==='string'?confirm.action.week:week;
+ const confirmWeekIssues=admin&&data&&confirm?.action.action==='publish'?weekHourIssues(data,confirmWeek):[];
  const assignmentIssues=admin&&data&&modal?.shift&&employeeId!=='none'?assignmentHourIssues(data,modal.shift,employeeId):[];
  const assignmentOverlap=!!(admin&&data&&modal?.shift&&employeeId!=='none'&&data.shifts.some(shift=>shift.id!==modal.shift!.id&&shift.employeeId===employeeId&&overlaps(shift,modal.shift!)));
  const moveTarget=data?.shifts?.find(shift=>shift.id===moveId);
@@ -185,45 +202,63 @@ export default function Scheduler(){
  const savePriority=async(ids:string[])=>{setPriority(ids);setPriorityDirty(true);priorityUnsaved.current=true;await act({action:'priority',ids});};
  const reorder=async(index:number,direction:number)=>{const next=[...priority];[next[index],next[index+direction]]=[next[index+direction],next[index]];await savePriority(next);};
  const requestShift=(shift:Shift)=>{
+  if(latest.current?.role!=='employee')return;
   const existing=latest.current?.requests.find(request=>request.shiftId===shift.id&&request.employeeId===latest.current?.employeeId);
   if(!existing)void act({action:'request',shiftId:shift.id,note:''},true);
  };
  const assignShift=(shift:Shift,id:string|null)=>{
-  const current=latest.current;if(!current)return;
+  const current=latest.current;if(current?.role!=='admin')return;
+  setWeek(weekOf(shift.date));
   if(id&&(assignmentHourIssues(current,shift,id).length>0||current.shifts.some(other=>other.id!==shift.id&&other.employeeId===id&&overlaps(other,shift)))){openShift(shift,id,true);return;}
   void act({action:'assign',shiftId:shift.id,employeeId:id});
  };
- const publishWeek=()=>{
-  if(!published&&weekIssues.length){setConfirm({title:'Publish with extra hours?',description:'Review these limits and approve an exception to publish.',action:{action:'publish',week,published:true}});return;}
-  void act({action:'publish',week,published:!published});
+ const publishWeek=(targetWeek:string)=>{
+  const current=latest.current;if(current?.role!=='admin')return;
+  const isPublished=current.weeks[targetWeek]==='published';
+  if(!isPublished&&weekHourIssues(current,targetWeek).length){setConfirm({title:'Publish with extra hours?',description:`${weekRange(targetWeek)}. Review these limits and approve an exception to publish.`,action:{action:'publish',week:targetWeek,published:true}});return;}
+  void act({action:'publish',week:targetWeek,published:!isPublished});
  };
- const openCreateWeek=()=>{
-  if(!admin||shifts.length)return;
-  const available=Array.from(new Set((latest.current?.shifts??[]).map(shift=>weekOf(shift.date)))).filter(savedWeek=>savedWeek<week).sort().reverse();
-  const previous=addDays(week,-7);
-  setCopySource(available.includes(previous)?previous:available[0]??'standard');
+ const openCreateWeek=(targetWeek:string)=>{
+  if(!admin||(latest.current?.shifts??[]).some(shift=>weekOf(shift.date)===targetWeek))return;
+  const available=Array.from(new Set((latest.current?.shifts??[]).map(shift=>weekOf(shift.date)))).filter(savedWeek=>savedWeek<targetWeek).sort().reverse();
+  const previous=addDays(targetWeek,-7);
+  setWeek(targetWeek);setCopySource(available.includes(previous)?previous:available[0]??'standard');
   setCopyAssignments(false);setCopyAllowOverlap(false);setCopyOverrideHours(false);
-  setModal({kind:'week',date:week});
+  setModal({kind:'week',date:targetWeek});
  };
- const header=<header className="topbar simple-topbar"><a href="/" className="brand"><span className="brand-icon"><CalendarDays size={21}/></span>shiftboard<span className="brand-dot">.</span></a><div className="account"><span className="signed-in-name">{data?.userName??''}</span>{admin&&<span className="admin-badge">Admin</span>}<form action="/signout" method="post"><button type="submit" className="text-button">Sign out</button></form></div></header>;
+ const jumpToWeek=(targetWeek:string)=>{
+  setWeek(targetWeek);setJumpTarget(targetWeek);
+  document.getElementById(`week-${targetWeek}`)?.scrollIntoView({block:'start',behavior:'smooth'});
+ };
+ const header=<header className="topbar simple-topbar"><a href="/" className="brand"><span className="brand-icon"><CalendarDays size={21}/></span>shiftboard<span className="brand-dot">.</span></a><div className="account">{data&&data.role!=='public'?<><span className="signed-in-name">{data.userName}</span>{admin&&<span className="admin-badge">Admin</span>}<form action="/signout" method="post"><button type="submit" className="text-button">Sign out</button></form></>:<a className="text-button public-sign-in" href="/login">Sign in to request</a>}</div></header>;
  if(!data)return <>{header}<main className="loading">{error?<Blank title="Schedule unavailable"><span>{error}</span><button className="btn primary" onClick={refresh}>Try again</button></Blank>:<><Skeleton className="h-10 w-64"/><Skeleton className="h-96 w-full mt-8"/></>}</main></>;
  if(data.role==='setup'||data.role==='guest')return <>{header}<main className="onboarding simple-onboarding"><h1>{data.role==='setup'?'Set up your schedule':'Employee sign-in'}</h1><p>{data.role==='setup'?'Import your team and shifts to get started.':'Use the phone number registered by your admin.'}</p>{data.role==='setup'?<button className="btn primary big" disabled={busy} onClick={()=>act({action:'setup'})}>Set up workspace</button>:<a className="btn primary big" href="/login?mode=employee">Sign in with phone</a>}<form action="/signout" method="post"><button type="submit" className="text-button signout">Switch account</button></form></main><Toaster richColors/></>;
 
  const schedule=<>
-  <div className="simple-page-heading"><h1>Schedule</h1><div className="inline-actions">
-   {admin&&<button className="btn primary" disabled={busy||!shifts.length} onClick={publishWeek}>{published?'Reopen':'Publish'}</button>}
-   <DropdownMenu><DropdownMenuTrigger asChild><button className="btn outline icon-button" aria-label="More actions"><MoreHorizontal size={19}/></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="schedule-menu">
-    {admin&&<><DropdownMenuItem onSelect={()=>setModal({kind:'shift',date:week})}><Plus/> Add shift</DropdownMenuItem><DropdownMenuItem disabled={busy||!shifts.length||!priorityReady||published} onSelect={()=>setConfirm({title:'Auto-assign open shifts?',description:'Includes shifts you held open. Existing manual and imported assignments stay in place. Work-hour limits still apply.',action:{action:'auto',week}})}><Sparkles/> Auto-assign</DropdownMenuItem><DropdownMenuSeparator/></>}
-    <DropdownMenuItem disabled={busy||priorityDirty} onSelect={()=>void refresh()}><RefreshCw/> Refresh</DropdownMenuItem><DropdownMenuItem onSelect={()=>setWeek(INITIAL_WEEK)}>Go to imported week</DropdownMenuItem>
-   </DropdownMenuContent></DropdownMenu>
+  <div className="simple-page-heading calendar-heading"><h1>Schedule</h1><div className="inline-actions">
+   {admin&&<button className="btn primary" disabled={busy} onClick={()=>openCreateWeek(nextWeek)}><Plus size={16}/> Create next week</button>}
+   <button className="btn outline icon-button" aria-label="Refresh schedule" disabled={busy||priorityDirty} onClick={()=>void refresh()}><RefreshCw size={17}/></button>
   </div></div>
-  <div className="simple-schedule-toolbar"><div className="simple-week-picker"><button className="btn outline icon-button" aria-label="Previous week" onClick={()=>setWeek(addDays(week,-7))}><ChevronLeft size={19}/></button><h2>{fmt(week)} – {fmt(addDays(week,6))}<span>, {week.slice(0,4)}</span></h2><button className="btn outline icon-button" aria-label="Next week" onClick={()=>setWeek(addDays(week,7))}><ChevronRight size={19}/></button><span className={'status '+(published?'published':'')}>{published?'Published':'Draft'}</span></div>
-   {!admin&&<div className="shift-filters" role="group" aria-label="Show shifts"><button aria-pressed={filter==='all'} onClick={()=>setFilter('all')}>All shifts</button><button aria-pressed={filter==='assigned'} onClick={()=>setFilter('assigned')}>My shifts</button><button aria-pressed={filter==='requested'} onClick={()=>setFilter('requested')}>My requests <span data-testid="request-count">{ownRequests.length}</span></button></div>}
+  <div className="simple-schedule-toolbar calendar-toolbar">
+   <label className="calendar-jump">Jump to week<input type="date" aria-label="Jump to week" value={week} onChange={event=>{if(/^\d{4}-\d{2}-\d{2}$/.test(event.target.value))jumpToWeek(weekOf(event.target.value));}}/></label>
+   {employee&&<div className="shift-filters" role="group" aria-label="Show shifts"><button aria-pressed={filter==='all'} onClick={()=>setFilter('all')}>All shifts</button><button aria-pressed={filter==='assigned'} onClick={()=>setFilter('assigned')}>My shifts</button><button aria-pressed={filter==='requested'} onClick={()=>setFilter('requested')}>My requests <span data-testid="request-count">{ownRequests.length}</span></button></div>}
   </div>
-  {!published&&!priorityReady&&<p className="schedule-hint">Waiting for admin to set priority.{admin&&<> <button className="text-button" onClick={()=>setTab('team')}>Set order</button></>}</p>}
-  {!published&&priorityReady&&!admin&&<p className="schedule-hint">Assignments may change until published.</p>}
-  {admin&&weekIssues.length>0&&<p className="schedule-hint"><button className="text-button hours-over" onClick={()=>setTab('settings')}>{new Set(weekIssues.map(issue=>issue.employeeId)).size} employee(s) over hour limits</button></p>}
-  {shifts.length?<ShiftBoard shifts={shifts} employees={employees} requests={requests} week={week} admin={admin} employeeId={data.employeeId} published={published} priorityReady={priorityReady} busy={busy} filter={admin?'all':filter} onRequest={requestShift} onWithdraw={request=>void act({action:'withdraw',requestId:request.id},true)} onOpen={openShift} onAssign={assignShift} onAdd={admin?date=>setModal({kind:'shift',date}):undefined}/>:<section className="content-card"><Blank title="No shifts this week">{admin?<button className="btn primary" disabled={busy} onClick={openCreateWeek}>Create this week</button>:<p>Your admin hasn’t added this week yet.</p>}</Blank></section>}
+  {canInteract&&savedWeeks.some(savedWeek=>data.weeks[savedWeek]!=='published')&&(!priorityReady?<p className="schedule-hint">Waiting for admin to set priority.{admin&&<> <button className="text-button" onClick={()=>setTab('team')}>Set order</button></>}</p>:employee&&<p className="schedule-hint">Assignments may change until published.</p>)}
+  <div className="calendar-weeks">{calendarWeeks.map(savedWeek=>{
+   const weekShifts=shifts.filter(shift=>weekOf(shift.date)===savedWeek);
+   const weekShiftIds=new Set(weekShifts.map(shift=>shift.id));
+   const weekRequests=requests.filter(request=>weekShiftIds.has(request.shiftId));
+   const isPublished=data.weeks[savedWeek]==='published';
+   const issues=admin?weekHourIssues(data,savedWeek):[];
+   return <section key={savedWeek} id={`week-${savedWeek}`} data-testid="schedule-week" data-week={savedWeek} className="calendar-week" aria-label={`Week of ${weekRange(savedWeek)}`}>
+    <header className="calendar-week-header"><div className="calendar-week-title"><h2>{weekRange(savedWeek)}</h2><span className={'status '+(isPublished?'published':'')}>{isPublished?'Published':'Draft'}</span></div>
+     {admin&&<div className="inline-actions"><button className="btn outline" disabled={busy||!weekShifts.length} onClick={()=>{setWeek(savedWeek);publishWeek(savedWeek);}}>{isPublished?'Reopen':'Publish'}</button><DropdownMenu><DropdownMenuTrigger asChild><button className="btn outline icon-button" aria-label={`More actions for week of ${fmt(savedWeek)}`}><MoreHorizontal size={18}/></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="schedule-menu"><DropdownMenuItem disabled={busy} onSelect={()=>{setWeek(savedWeek);setModal({kind:'shift',date:savedWeek});}}><Plus/> Add shift</DropdownMenuItem><DropdownMenuItem disabled={busy||!weekShifts.length||!priorityReady||isPublished} onSelect={()=>setConfirm({title:'Auto-assign open shifts?',description:`${weekRange(savedWeek)}. Includes shifts you held open. Existing manual and imported assignments stay in place. Work-hour limits still apply.`,action:{action:'auto',week:savedWeek}})}><Sparkles/> Auto-assign</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>}
+    </header>
+    {!!issues.length&&<p className="schedule-hint"><button className="text-button hours-over" onClick={()=>{setWeek(savedWeek);setTab('settings');}}>{new Set(issues.map(issue=>issue.employeeId)).size} employee(s) over hour limits</button></p>}
+    {weekShifts.length?<ShiftBoard shifts={weekShifts} employees={employees} requests={weekRequests} week={savedWeek} admin={admin} readOnly={readOnly} employeeId={employee?data.employeeId:undefined} published={isPublished} priorityReady={priorityReady} busy={busy} filter={employee?filter:'all'} onRequest={requestShift} onWithdraw={request=>void act({action:'withdraw',requestId:request.id},true)} onOpen={openShift} onAssign={assignShift} onAdd={admin?date=>{setWeek(weekOf(date));setModal({kind:'shift',date});}:undefined}/>:<div className="calendar-empty"><p>No shifts this week.</p>{admin&&<button className="btn primary" disabled={busy||isPublished} onClick={()=>openCreateWeek(savedWeek)}>Create this week</button>}</div>}
+   </section>;
+  })}</div>
+  {!calendarWeeks.length&&<Blank title="No shifts yet">The schedule will appear here once your admin adds shifts.</Blank>}
  </>;
  const team=<>
   <div className="simple-page-heading"><div><h1>Team</h1><p>Higher rows get first choice. Changes save automatically.</p></div><div className="team-actions"><EmployeeAccessLink compact/><button className="btn primary" disabled={busy} onClick={()=>setModal({kind:'employee'})}><Plus size={16}/> Add employee</button><DropdownMenu><DropdownMenuTrigger asChild><button className="btn outline icon-button" aria-label="More team actions"><MoreHorizontal size={19}/></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={busy||activeEmployees.some(employee=>!employee.hireDate)} onSelect={()=>void savePriority([...activeEmployees].sort((a,b)=>a.hireDate.localeCompare(b.hireDate)||a.name.localeCompare(b.name)).map(employee=>employee.id))}>Order by hire date</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div></div>
@@ -235,9 +270,9 @@ export default function Scheduler(){
 
  return <>{header}<main className="app-shell simple-shell">
   {error&&<div role="alert" className="error-banner">{error} <button className="text-button" onClick={refresh}>Try again</button></div>}
-  {admin?<Tabs value={tab} onValueChange={setTab}><TabsList variant="line" className="main-tabs simple-main-tabs"><TabsTrigger value="schedule"><CalendarDays/> Schedule</TabsTrigger><TabsTrigger value="team"><Users/> Team</TabsTrigger><TabsTrigger value="settings"><Settings/> Settings</TabsTrigger></TabsList><TabsContent value="schedule">{schedule}</TabsContent><TabsContent value="team">{team}</TabsContent><TabsContent value="settings"><div className="simple-page-heading"><h1>Settings</h1></div>{settingsSnapshot&&(settingsSnapshot.dailyMaxHours!==hourSettings.dailyMaxHours||settingsSnapshot.weeklyMaxHours!==hourSettings.weeklyMaxHours)&&<div className="hours-warning" role="status">Saved limits changed to {hourSettings.dailyMaxHours} hours/day and {hourSettings.weeklyMaxHours} hours/week. Your inputs are preserved.</div>}<WorkHourSettingsPanel settings={settingsSnapshot??hourSettings} employees={employees} shifts={data.shifts} week={week} busy={busy} onSave={async settings=>{const saved=await act({action:'settings',...settings});if(saved)setSettingsSnapshot(workHourSettings(saved));return saved;}}/></TabsContent></Tabs>:schedule}
+  {admin?<Tabs value={tab} onValueChange={setTab}><TabsList variant="line" className="main-tabs simple-main-tabs"><TabsTrigger value="schedule"><CalendarDays/> Schedule</TabsTrigger><TabsTrigger value="team"><Users/> Team</TabsTrigger><TabsTrigger value="settings"><Settings/> Settings</TabsTrigger></TabsList><TabsContent value="schedule">{schedule}</TabsContent><TabsContent value="team">{team}</TabsContent><TabsContent value="settings"><div className="simple-page-heading"><h1>Settings</h1><label className="calendar-jump">Hours for week<select aria-label="Hours for week" value={week} onChange={event=>setWeek(event.target.value)}>{Array.from(new Set([week,...savedWeeks])).sort().reverse().map(savedWeek=><option key={savedWeek} value={savedWeek}>{weekRange(savedWeek)}</option>)}</select></label></div>{settingsSnapshot&&(settingsSnapshot.dailyMaxHours!==hourSettings.dailyMaxHours||settingsSnapshot.weeklyMaxHours!==hourSettings.weeklyMaxHours)&&<div className="hours-warning" role="status">Saved limits changed to {hourSettings.dailyMaxHours} hours/day and {hourSettings.weeklyMaxHours} hours/week. Your inputs are preserved.</div>}<WorkHourSettingsPanel settings={settingsSnapshot??hourSettings} employees={employees} shifts={data.shifts} week={week} busy={busy} onSave={async settings=>{const saved=await act({action:'settings',...settings});if(saved)setSettingsSnapshot(workHourSettings(saved));return saved;}}/></TabsContent></Tabs>:schedule}
  </main>
- <Dialog open={!!modal} onOpenChange={open=>{if(!open)setModal(null);}}><DialogContent className="app-dialog simple-dialog"><DialogHeader><DialogTitle>{modal?.kind==='week'?'Create week':modal?.kind==='assignment'?`${modal.shift?.label} · ${fmt(modal.shift!.date)}`:modal?.kind==='employee'?(modal.employee?'Edit employee':'Add employee'):modal?.kind==='editShift'?'Edit shift':'Add shift'}</DialogTitle><DialogDescription>{modal?.kind==='week'?weekRange(copyTarget):modal?.kind==='assignment'?`${modal.shift?.start}–${modal.shift?.end}${modal.shift&&modal.shift.end<=modal.shift.start?' · ends next day':''}`:modal?.kind==='employee'?'Name and phone sign-in.':'Choose the date and hours.'}</DialogDescription></DialogHeader>
+ <Dialog open={!!modal&&canInteract&&(modal.kind==='assignment'||admin)} onOpenChange={open=>{if(!open)setModal(null);}}><DialogContent className="app-dialog simple-dialog"><DialogHeader><DialogTitle>{modal?.kind==='week'?'Create week':modal?.kind==='assignment'?`${modal.shift?.label} · ${fmt(modal.shift!.date)}`:modal?.kind==='employee'?(modal.employee?'Edit employee':'Add employee'):modal?.kind==='editShift'?'Edit shift':'Add shift'}</DialogTitle><DialogDescription>{modal?.kind==='week'?weekRange(copyTarget):modal?.kind==='assignment'?`${modal.shift?.start}–${modal.shift?.end}${modal.shift&&modal.shift.end<=modal.shift.start?' · ends next day':''}`:modal?.kind==='employee'?'Name and phone sign-in.':'Choose the date and hours.'}</DialogDescription></DialogHeader>
   {modal?.kind==='week'&&<form className="form-stack week-copy-form" onSubmit={event=>{
    event.preventDefault();
    if(busy||copyTargetHasShifts||copyPreviewError||(copySource!=='standard'&&!copyPreview)||(copyNeedsOverlap&&!copyAllowOverlap)||(copyNeedsHours&&!copyOverrideHours))return;
@@ -257,7 +292,7 @@ export default function Scheduler(){
   {modal?.kind==='employee'&&<form className="form-stack" onSubmit={event=>{event.preventDefault();const fields=new FormData(event.currentTarget);void doAndClose({action:'employee',id:modal.employee?.id,name:fields.get('name'),hireDate:fields.get('hireDate'),phone:fields.get('phone')});}}><label>Name<input required name="name" maxLength={80} defaultValue={modal.employee?.name}/></label><label>Phone<input type="tel" name="phone" autoComplete="tel" maxLength={50} defaultValue={modal.employee?.phone} placeholder="(604) 555-0123"/></label><p className="helper">Use 10 digits for US/Canada or +country code. Leave blank to disable sign-in.</p><details className="advanced-options"><summary>More details</summary><label>Hire date<input type="date" name="hireDate" defaultValue={modal.employee?.hireDate}/></label></details><button className="btn primary" disabled={busy}>Save employee</button></form>}
   {(modal?.kind==='shift'||modal?.kind==='editShift')&&<form className="form-stack" onSubmit={event=>{event.preventDefault();const fields=new FormData(event.currentTarget);void doAndClose({action:'shift',id:modal.shift?.id,label:fields.get('label'),date:fields.get('date'),start:fields.get('start'),end:fields.get('end')});}}><label>Shift name<input name="label" required defaultValue={modal.shift?.label??'Morning'}/></label><label>Date<input type="date" name="date" required defaultValue={modal.shift?.date??modal.date??week}/></label><div className="form-row"><label>Start<input type="time" name="start" required defaultValue={modal.shift?.start??'07:30'}/></label><label>End<input type="time" name="end" required defaultValue={modal.shift?.end??'13:00'}/></label></div><p className="helper">An earlier end time means the next day.</p><button className="btn primary" disabled={busy}>Save shift</button></form>}
   {modal?.kind==='assignment'&&<div className="form-stack">
-   <RequestQueue requests={requests.filter(request=>request.shiftId===modal.shift!.id)} employees={employees} shift={modal.shift!} published={published} priorityReady={priorityReady} admin={admin} busy={busy} currentEmployeeId={data.employeeId} onWithdraw={request=>void act({action:'withdraw',requestId:request.id})}/>
+   <RequestQueue requests={modalRequests.filter(request=>request.shiftId===modal.shift!.id)} employees={employees} shift={modal.shift!} published={modalPublished} priorityReady={priorityReady} admin={admin} busy={busy} currentEmployeeId={data.employeeId} onWithdraw={request=>void act({action:'withdraw',requestId:request.id})}/>
    {admin?<>
     <label>Assigned employee<Pick label="Assign employee" value={employeeId} onChange={setEmployeeId} options={[{value:'none',label:'Open / unassigned'},...activeEmployees.map(employee=>({value:employee.id,label:employee.name}))]}/></label>
     <details className="advanced-options" open={advanced} onToggle={event=>setAdvanced(event.currentTarget.open)}><summary>Advanced options</summary><div className="form-stack">
@@ -266,18 +301,18 @@ export default function Scheduler(){
      {assignmentIssues.length>0&&<div className="hours-warning"><strong>Work-hour limits exceeded</strong><ul>{assignmentIssues.map(issue=><li key={issue.kind+issue.period}>{hourIssueText(issue)}</li>)}</ul></div>}
      <label className="checkbox-label"><Checkbox checked={overrideHourLimits} onCheckedChange={value=>setOverrideHourLimits(value===true)}/> Admin override: allow this change to exceed work-hour limits</label>
      {!modal.shift!.employeeId&&modal.shift!.requestAssignmentLocked&&<p className="helper">Held open. Auto-assign includes this shift again.</p>}
-     {modal.shift!.employeeId&&<><label>Move assignment<Pick label="Move to open shift" value={moveId} onChange={setMoveId} options={[{value:'none',label:'Choose an open shift'},...shifts.filter(shift=>!shift.employeeId&&shift.id!==modal.shift!.id).map(shift=>({value:shift.id,label:`${fmt(shift.date)} · ${shift.label} (${shift.start})`}))]}/></label>{moveIssues.length>0&&<div className="hours-warning"><ul>{moveIssues.map(issue=><li key={issue.kind+issue.period}>{hourIssueText(issue)}</li>)}</ul></div>}<button className="btn outline" disabled={busy||moveId==='none'} onClick={()=>doAndClose({action:'move',fromId:modal.shift!.id,toId:moveId,allowOverlap,overrideHourLimits})}>Move assignment</button></>}
-     {!published&&<details className="record-request"><summary>Record a request</summary><div className="form-stack"><Pick label="Employee requesting shift" value={requestEmployeeId} onChange={id=>{setRequestEmployeeId(id);setNote(data.requests.find(request=>request.shiftId===modal.shift!.id&&request.employeeId===id)?.note??'');}} options={[{value:'none',label:'Choose employee'},...activeEmployees.map(employee=>({value:employee.id,label:employee.name}))]}/><label>Private note<textarea value={note} onChange={event=>setNote(event.target.value)} maxLength={300}/></label><button className="btn outline" disabled={busy||requestEmployeeId==='none'} onClick={()=>doAndClose({action:'request',shiftId:modal.shift!.id,employeeId:requestEmployeeId,note})}>Save request</button></div></details>}
+     {modal.shift!.employeeId&&<><label>Move assignment<Pick label="Move to open shift" value={moveId} onChange={setMoveId} options={[{value:'none',label:'Choose an open shift'},...modalWeekShifts.filter(shift=>!shift.employeeId&&shift.id!==modal.shift!.id).map(shift=>({value:shift.id,label:`${fmt(shift.date)} · ${shift.label} (${shift.start})`}))]}/></label>{moveIssues.length>0&&<div className="hours-warning"><ul>{moveIssues.map(issue=><li key={issue.kind+issue.period}>{hourIssueText(issue)}</li>)}</ul></div>}<button className="btn outline" disabled={busy||moveId==='none'} onClick={()=>doAndClose({action:'move',fromId:modal.shift!.id,toId:moveId,allowOverlap,overrideHourLimits})}>Move assignment</button></>}
+     {!modalPublished&&<details className="record-request"><summary>Record a request</summary><div className="form-stack"><Pick label="Employee requesting shift" value={requestEmployeeId} onChange={id=>{setRequestEmployeeId(id);setNote(data.requests.find(request=>request.shiftId===modal.shift!.id&&request.employeeId===id)?.note??'');}} options={[{value:'none',label:'Choose employee'},...activeEmployees.map(employee=>({value:employee.id,label:employee.name}))]}/><label>Private note<textarea value={note} onChange={event=>setNote(event.target.value)} maxLength={300}/></label><button className="btn outline" disabled={busy||requestEmployeeId==='none'} onClick={()=>doAndClose({action:'request',shiftId:modal.shift!.id,employeeId:requestEmployeeId,note})}>Save request</button></div></details>}
      <div className="shift-detail-actions"><button className="text-button" disabled={!!modal.shift!.employeeId} onClick={()=>setModal({kind:'editShift',shift:modal.shift})}>Edit date / time</button><button className="text-button danger" disabled={!!modal.shift!.employeeId} onClick={()=>setConfirm({title:'Remove this shift?',description:'The shift and its requests will be removed.',action:{action:'deleteShift',shiftId:modal.shift!.id}})}>Remove shift</button></div>{modal.shift!.employeeId&&<p className="helper">Unassign before editing or removing.</p>}
     </div></details>
     <button className="btn primary" disabled={busy||(assignmentOverlap&&!allowOverlap)||(assignmentIssues.length>0&&!overrideHourLimits)} onClick={()=>doAndClose({action:'assign',shiftId:modal.shift!.id,employeeId:employeeId==='none'?null:employeeId,allowOverlap,overrideHourLimits})}>Save assignment</button>
-   </>:!published?<>
+   </>:employee&&!modalPublished?<>
     <label>Private note <span className="muted">(optional)</span><textarea value={note} onChange={event=>setNote(event.target.value)} maxLength={300} placeholder="Only you and your admin can read this."/></label>
-    <button className="btn primary" disabled={busy} onClick={()=>doAndClose({action:'request',shiftId:modal.shift!.id,note})}>{requests.some(request=>request.shiftId===modal.shift!.id&&request.employeeId===data.employeeId)?'Save note':'Request shift'}</button>
+    <button className="btn primary" disabled={busy} onClick={()=>doAndClose({action:'request',shiftId:modal.shift!.id,note})}>{modalRequests.some(request=>request.shiftId===modal.shift!.id&&request.employeeId===data.employeeId)?'Save note':'Request shift'}</button>
    </>:<p className="helper">This week is published.</p>}
   </div>}
  </DialogContent></Dialog>
- <AlertDialog open={!!confirm} onOpenChange={open=>{if(!open)setConfirm(null);}}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{confirm?.title}</AlertDialogTitle><AlertDialogDescription>{confirm?.description}</AlertDialogDescription></AlertDialogHeader>{confirm?.action.action==='publish'&&confirm.action.published===true&&weekIssues.length>0&&<div className="form-stack"><div className="hours-warning"><ul>{weekIssues.map(issue=><li key={issue.employeeId+issue.kind+issue.period}>{name(issue.employeeId)}: {hourIssueText(issue)}</li>)}</ul></div><label className="checkbox-label"><Checkbox checked={overridePublishHours} onCheckedChange={value=>setOverridePublishHours(value===true)}/> Admin override: approve these extra hours and publish</label></div>}<AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction disabled={busy||(confirm?.action.action==='publish'&&confirm.action.published===true&&weekIssues.length>0&&!overridePublishHours)} onClick={async()=>{const saved=await act({...confirm!.action,...(confirm!.action.action==='publish'?{overrideHourLimits:overridePublishHours}:{})});if(saved){setConfirm(null);setModal(null);}}}>Confirm</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+ <AlertDialog open={!!confirm&&admin} onOpenChange={open=>{if(!open)setConfirm(null);}}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{confirm?.title}</AlertDialogTitle><AlertDialogDescription>{confirm?.description}</AlertDialogDescription></AlertDialogHeader>{confirm?.action.action==='publish'&&confirm.action.published===true&&confirmWeekIssues.length>0&&<div className="form-stack"><div className="hours-warning"><ul>{confirmWeekIssues.map(issue=><li key={issue.employeeId+issue.kind+issue.period}>{name(issue.employeeId)}: {hourIssueText(issue)}</li>)}</ul></div><label className="checkbox-label"><Checkbox checked={overridePublishHours} onCheckedChange={value=>setOverridePublishHours(value===true)}/> Admin override: approve these extra hours and publish</label></div>}<AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction disabled={busy||(confirm?.action.action==='publish'&&confirm.action.published===true&&confirmWeekIssues.length>0&&!overridePublishHours)} onClick={async()=>{const saved=await act({...confirm!.action,...(confirm!.action.action==='publish'?{overrideHourLimits:overridePublishHours}:{})});if(saved){setConfirm(null);setModal(null);}}}>Confirm</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
  <Toaster richColors position="bottom-right"/>
  </>;
 }
