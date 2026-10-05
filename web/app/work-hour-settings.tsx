@@ -1,12 +1,50 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Clock3, ShieldCheck } from 'lucide-react';
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { addDays, dailyWorkHours, weeklyWorkHours, weekHourIssues, formatHours, hourIssueText, type WorkHourSettings, type Employee, type Shift } from '@/lib/schedule';
-type Props={settings:WorkHourSettings;employees:Employee[];shifts:Shift[];week:string;busy:boolean;onSave:(settings:WorkHourSettings)=>Promise<unknown>};
-export default function WorkHourSettingsPanel({settings,employees,shifts,week,busy,onSave}:Props){
- const [daily,setDaily]=useState(String(settings.dailyMaxHours)),[weekly,setWeekly]=useState(String(settings.weeklyMaxHours));
- useEffect(()=>{setDaily(String(settings.dailyMaxHours));setWeekly(String(settings.weeklyMaxHours));},[settings.dailyMaxHours,settings.weeklyMaxHours]);
- const issues=weekHourIssues({settings,shifts,employees},week);
- return <div className="hours-settings-layout"><section className="content-card"><div className="section-heading"><div><h3>Work-hour limits</h3><p>Apply the same limits to every employee. Only admins can change these settings.</p></div></div><form className="form-stack" onSubmit={e=>{e.preventDefault();void onSave({dailyMaxHours:Number(daily),weeklyMaxHours:Number(weekly)});}}><div className="form-row"><label>Maximum hours per day<input type="number" min="0.25" max="24" step="0.25" required value={daily} onChange={e=>setDaily(e.target.value)}/></label><label>Maximum hours per week<input type="number" min="0.25" max="168" step="0.25" required value={weekly} onChange={e=>setWeekly(e.target.value)}/></label></div><button className="btn primary" disabled={busy||(Number(daily)===settings.dailyMaxHours&&Number(weekly)===settings.weeklyMaxHours)}>Save work-hour limits</button></form><div className="hours-explainer"><Clock3 size={18}/><p>Days run midnight to midnight. Weeks run Sunday through Saturday. Overnight hours are split between the dates worked. Overlapping duties count once toward total hours.</p></div><div className="hours-explainer"><ShieldCheck size={18}/><p>Automatic request assignments always respect these limits. Admins can approve extra hours when assigning, moving, or publishing shifts. Manual and published assignments stay in place; provisional request assignments may change when limits change.</p></div></section><section className="content-card"><div className="section-heading"><div><h3>Hours for the selected week</h3><p>{week} through {addDays(week,6)} · Includes overnight hours carried in from Saturday.</p></div><span className={'status '+(issues.length?'':'published')}>{issues.length?`${new Set(issues.map(i=>i.employeeId)).size} employees over limit`:'Within limits'}</span></div><Table><TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Highest daily hours</TableHead><TableHead>Weekly hours</TableHead><TableHead>Review</TableHead></TableRow></TableHeader><TableBody>{employees.map(e=>{const days=dailyWorkHours(shifts,e.id),total=weeklyWorkHours(days,week),highest=Math.max(0,...Array.from({length:7},(_,i)=>days[addDays(week,i)]??0)),employeeIssues=issues.filter(i=>i.employeeId===e.id);return <TableRow key={e.id}><TableCell><strong>{e.name}</strong></TableCell><TableCell className={highest>settings.dailyMaxHours?'hours-over':''}>{formatHours(highest)} / {formatHours(settings.dailyMaxHours)}</TableCell><TableCell className={total>settings.weeklyMaxHours?'hours-over':''}>{formatHours(total)} / {formatHours(settings.weeklyMaxHours)}</TableCell><TableCell>{employeeIssues.length?<ul className="hours-issue-list">{employeeIssues.map(i=><li key={i.kind+i.period}>{hourIssueText(i)}</li>)}</ul>:<span className="muted">Within limits</span>}</TableCell></TableRow>})}</TableBody></Table><p className="table-note">Requests are preferences and do not count as worked hours. Limits are checked against actual assignments. Overages require explicit admin approval when you publish.</p></section></div>;
+
+type Props = { settings: WorkHourSettings; employees: Employee[]; shifts: Shift[]; week: string; busy: boolean; onSave: (settings: WorkHourSettings) => Promise<unknown> };
+
+export default function WorkHourSettingsPanel({ settings, employees, shifts, week, busy, onSave }: Props) {
+  const [daily, setDaily] = useState(String(settings.dailyMaxHours));
+  const [weekly, setWeekly] = useState(String(settings.weeklyMaxHours));
+  useEffect(() => { setDaily(String(settings.dailyMaxHours)); setWeekly(String(settings.weeklyMaxHours)); }, [settings.dailyMaxHours, settings.weeklyMaxHours]);
+  const issues = weekHourIssues({ settings, shifts, employees }, week);
+  const overLimit = new Set(issues.map(issue => issue.employeeId)).size;
+  return <div className="hours-settings-layout">
+    <section className="content-card">
+      <div className="section-heading"><div><h3>Work-hour limits</h3><p>Automatic assignments stay within these limits. You can approve exceptions.</p></div></div>
+      <form className="form-stack" onSubmit={event => { event.preventDefault(); void onSave({ dailyMaxHours: Number(daily), weeklyMaxHours: Number(weekly) }); }}>
+        <div className="form-row">
+          <label>Maximum hours per day<input type="number" min="0.25" max="24" step="0.25" required value={daily} onChange={event => setDaily(event.target.value)}/></label>
+          <label>Maximum hours per week<input type="number" min="0.25" max="168" step="0.25" required value={weekly} onChange={event => setWeekly(event.target.value)}/></label>
+        </div>
+        <button className="btn primary" disabled={busy || (Number(daily) === settings.dailyMaxHours && Number(weekly) === settings.weeklyMaxHours)}>Save work-hour limits</button>
+      </form>
+      <details className="hours-explainer">
+        <summary>How hours are counted</summary>
+        <p>Weeks run Sunday through Saturday. Overnight shifts split at midnight; overlapping duties count once. Changing limits may update tentative assignments. Manual and published assignments stay in place.</p>
+      </details>
+    </section>
+    <section className="content-card">
+      <details open={overLimit > 0}>
+        <summary className="hours-summary">Weekly hours · {overLimit ? `${overLimit} over limit` : 'Within limits'}</summary>
+        <p className="helper">{week} – {addDays(week, 6)}</p>
+        <Table><TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Daily max</TableHead><TableHead>Week total</TableHead><TableHead>Review</TableHead></TableRow></TableHeader>
+          <TableBody>{employees.map(employee => {
+            const days = dailyWorkHours(shifts, employee.id);
+            const total = weeklyWorkHours(days, week);
+            const highest = Math.max(0, ...Array.from({ length: 7 }, (_, index) => days[addDays(week, index)] ?? 0));
+            const employeeIssues = issues.filter(issue => issue.employeeId === employee.id);
+            return <TableRow key={employee.id}>
+              <TableCell><strong>{employee.name}</strong></TableCell>
+              <TableCell className={highest > settings.dailyMaxHours ? 'hours-over' : ''}>{formatHours(highest)} / {formatHours(settings.dailyMaxHours)}</TableCell>
+              <TableCell className={total > settings.weeklyMaxHours ? 'hours-over' : ''}>{formatHours(total)} / {formatHours(settings.weeklyMaxHours)}</TableCell>
+              <TableCell>{employeeIssues.length ? <ul className="hours-issue-list">{employeeIssues.map(issue => <li key={issue.kind + issue.period}>{hourIssueText(issue)}</li>)}</ul> : <span className="muted">Within limits</span>}</TableCell>
+            </TableRow>;
+          })}</TableBody>
+        </Table>
+      </details>
+    </section>
+  </div>;
 }
